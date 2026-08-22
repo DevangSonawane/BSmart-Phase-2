@@ -465,6 +465,21 @@ class _BSmartAppState extends State<BSmartApp> with WidgetsBindingObserver {
           );
         }
 
+        // /profile/:userId/posts
+        if (segments.length == 3 &&
+            segments[0] == 'profile' &&
+            segments[2] == 'posts') {
+          final userId = segments[1];
+          debugPrint('[Router] → ProfileScreen posts userId=$userId');
+          return MaterialPageRoute<void>(
+            settings: settings,
+            builder: (ctx) => ProfileScreen(
+              userId: userId,
+              initialSection: ProfileViewSection.posts,
+            ),
+          );
+        }
+
         // /post/:postId
         if (segments.length == 2 && segments[0] == 'post') {
           final postId = segments[1];
