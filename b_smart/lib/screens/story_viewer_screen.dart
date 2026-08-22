@@ -1,0 +1,1506 @@
+import 'package:flutter/material.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
+import 'dart:async';
+import 'package:cached_network_image/cached_network_image.dart';
+import 'package:connectivity_plus/connectivity_plus.dart';
+import 'package:video_player/video_player.dart';
+import '../models/story_model.dart';
+import '../utils/current_user.dart';
+import '../utils/id_extractor.dart';
+import '../services/feed_service.dart';
+import '../services/story_cache.dart';
+import '../utils/timezone_service.dart';
+import '../utils/url_helper.dart';
+import '../widgets/offline_retry_banner.dart';
+import '../widgets/content_report_sheet.dart';
+import 'package:image_picker/image_picker.dart';
+import '../api/api.dart';
+
+class StoryViewerScreen extends StatefulWidget {
+  final List<StoryGroup> storyGroups;
+  final int initialIndex;
+
+  const StoryViewerScreen({
+    super.key,
+    required this.storyGroups,
+    this.initialIndex = 0,
+  });
+
+  @override
+  State<StoryViewerScreen> createState() => _StoryViewerScreenState();
+}
+
+class _StoryViewerScreenState extends State<StoryViewerScreen> {
+  late PageController _pageController;
+  late PageController _storyController;
+  int _currentGroupIndex = 0;
+  int _currentStoryIndex = 0;
+  Timer? _autoPlayTimer;
+  double _progress = 0.0;
+  bool _paused = false;
+  bool _waitingForMedia = false;
+  String? _pendingStoryId;
+  final FeedService _feedService = FeedService();
+  final StoriesApi _storiesApi = StoriesApi();
+  final Set<String> _viewedItemIds = <String>{};
+  final Set<String> _likedItemIds = <String>{};
+  VideoPlayerController? _videoCtl;
+  Future<void>? _initVideo;
+  Map<String, String>? _videoHeaders;
+  String? _videoStoryId;
+  int _videoRequestSerial = 0;
+  String? _endedStoryId;
+  double _cachedBottomInset = 0;
+  final Set<String> _fetchingStoryGroupIds = <String>{};
+  StreamSubscription<List<ConnectivityResult>>? _connectivitySub;
+  bool _isOffline = false;
+  int _offlineRetryAttempts = 0;
+  String? _currentUserId;
+
+  void _logStoryDebug(String message) {
+    debugPrint('[StoryViewer] $message');
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _currentGroupIndex = widget.initialIndex;
+    _pageController = PageController(initialPage: widget.initialIndex);
+    _storyController = PageController();
+    _listenConnectivity();
+    // Cache the bottom inset from the window directly at init time.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final view = View.of(context);
+      final inset = view.padding.bottom / view.devicePixelRatio;
+      if (inset > 0 && inset != _cachedBottomInset) {
+        setState(() {
+          _cachedBottomInset = inset;
+        });
+      }
+    });
+    ApiClient().getToken().then((token) {
+      if (!mounted) return;
+      if (token != null && token.isNotEmpty) {
+        setState(() {
+          _videoHeaders = {'Authorization': 'Bearer $token'};
+        });
+      }
+    });
+    CurrentUser.id.then((id) {
+      if (!mounted) return;
+      setState(() {
+        _currentUserId = id?.trim().isNotEmpty == true ? id!.trim() : null;
+      });
+    });
+    _startAutoPlay();
+  }
+
+  void _listenConnectivity() {
+    _connectivitySub = Connectivity().onConnectivityChanged.listen((results) {
+      final offline = results.contains(ConnectivityResult.none);
+      if (!mounted) return;
+      if (_isOffline != offline) {
+        setState(() {
+          _isOffline = offline;
+          if (!offline) {
+            _offlineRetryAttempts = 0;
+          }
+        });
+      } else if (!offline && _offlineRetryAttempts != 0) {
+        setState(() {
+          _offlineRetryAttempts = 0;
+        });
+      }
+    });
+  }
+
+  Future<bool> _isCurrentlyOffline() async {
+    final results = await Connectivity().checkConnectivity();
+    return results.contains(ConnectivityResult.none);
+  }
+
+  Future<void> _recordOfflineRetry() async {
+    final offline = await _isCurrentlyOffline();
+    if (!mounted) return;
+    setState(() {
+      _isOffline = offline;
+      if (offline) {
+        _offlineRetryAttempts++;
+      } else {
+        _offlineRetryAttempts = 0;
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _autoPlayTimer?.cancel();
+    _connectivitySub?.cancel();
+    _pageController.dispose();
+    _storyController.dispose();
+    _videoCtl?.dispose();
+    super.dispose();
+  }
+
+  bool _canShowReplyBar(Story? story) {
+    if (story == null) return false;
+    final currentUserId = _currentUserId?.trim();
+    final ownerId = story.userId.trim();
+    return currentUserId != null &&
+        currentUserId.isNotEmpty &&
+        ownerId.isNotEmpty &&
+        currentUserId == ownerId;
+  }
+
+  void _startAutoPlay() {
+    _autoPlayTimer?.cancel();
+    _progress = 0.0;
+    _paused = false;
+
+    final currentGroup = widget.storyGroups[_currentGroupIndex];
+    _logStoryDebug(
+      'startAutoPlay group=$_currentGroupIndex storyId=${currentGroup.storyId ?? ''} '
+      'stories=${currentGroup.stories.length} currentStoryIndex=$_currentStoryIndex',
+    );
+    // Lazy-load all items for current group when only a preview story is present
+    if (currentGroup.stories.length <= 1 &&
+        (currentGroup.storyId ?? '').isNotEmpty) {
+      _logStoryDebug(
+        'startAutoPlay preview-only fetch scheduled storyId=${currentGroup.storyId}',
+      );
+      // Fetch in the background, but still play the preview item immediately.
+      // Only block playback if there is nothing to show yet.
+      unawaited(_fetchGroupItems(_currentGroupIndex));
+      if (currentGroup.stories.isEmpty) return;
+    }
+    if (_currentStoryIndex >= currentGroup.stories.length) {
+      _nextGroup();
+      return;
+    }
+
+    final currentStory = currentGroup.stories[_currentStoryIndex];
+    _syncLikedStateForStory(currentStory);
+    _markCurrentStoryViewed(currentStory);
+    _logStoryDebug(
+      'startAutoPlay currentStory id=${currentStory.id} type=${currentStory.mediaType} '
+      'url=${currentStory.mediaUrl} texts=${currentStory.texts?.length ?? 0} '
+      'mentions=${currentStory.mentions?.length ?? 0}',
+    );
+    _pendingStoryId = currentStory.id;
+    _waitingForMedia = currentStory.mediaType == StoryMediaType.video;
+    _setupCurrentStoryMedia(currentStory);
+
+    if (!_waitingForMedia) {
+      _startAutoPlayTimer(currentStory);
+    } else if (_videoCtl != null &&
+        _videoCtl!.value.isInitialized &&
+        _videoStoryId == currentStory.id) {
+      _waitingForMedia = false;
+      _startAutoPlayTimer(currentStory);
+    }
+  }
+
+  void _markCurrentStoryViewed(Story story) {
+    final id = story.id.trim();
+    if (id.isEmpty || _viewedItemIds.contains(id)) return;
+    _viewedItemIds.add(id);
+    _logStoryDebug('markViewed story=$id');
+    unawaited(() async {
+      try {
+        await _feedService.markItemViewed(id);
+        _logStoryDebug('markViewed success story=$id');
+      } catch (e) {
+        _logStoryDebug('markViewed failed story=$id error=$e');
+      }
+    }());
+  }
+
+  void _startAutoPlayTimer(Story currentStory) {
+    _autoPlayTimer?.cancel();
+    final isImage = currentStory.mediaType == StoryMediaType.image;
+    int durationMs;
+    if (!isImage &&
+        _videoCtl != null &&
+        _videoCtl!.value.isInitialized &&
+        _videoStoryId == currentStory.id &&
+        _videoCtl!.value.duration.inMilliseconds > 0) {
+      durationMs = _videoCtl!.value.duration.inMilliseconds;
+    } else {
+      durationMs = isImage ? 5000 : ((currentStory.durationSec ?? 5) * 1000);
+    }
+    const tickMs = 16; // ~60fps for smoother progress
+    final start = DateTime.now();
+    _autoPlayTimer =
+        Timer.periodic(const Duration(milliseconds: tickMs), (timer) {
+      final elapsedMs = DateTime.now().difference(start).inMilliseconds;
+      final nextProgress =
+          durationMs <= 0 ? 1.0 : (elapsedMs / durationMs).clamp(0.0, 1.0);
+      if (mounted) {
+        setState(() {
+          _progress = nextProgress;
+        });
+      } else {
+        timer.cancel();
+        return;
+      }
+
+      if (_progress >= 1.0) {
+        timer.cancel();
+        final id = currentStory.id;
+        if (!_viewedItemIds.contains(id)) {
+          _viewedItemIds.add(id);
+          _feedService.markItemViewed(id).catchError((_) {});
+        }
+        _nextStory();
+      }
+    });
+  }
+
+  void _nextStory() {
+    final currentGroup = widget.storyGroups[_currentGroupIndex];
+    if (_currentStoryIndex < currentGroup.stories.length - 1) {
+      setState(() {
+        _currentStoryIndex++;
+        _progress = 0.0;
+      });
+      if (_storyController.hasClients) {
+        _storyController.nextPage(
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeInOut,
+        );
+      } else {
+        _storyController.jumpToPage(_currentStoryIndex);
+      }
+      _setupCurrentStoryMedia(
+          widget.storyGroups[_currentGroupIndex].stories[_currentStoryIndex]);
+      _startAutoPlay();
+    } else {
+      _nextGroup();
+    }
+  }
+
+  void _previousStory() {
+    if (_currentStoryIndex > 0) {
+      setState(() {
+        _currentStoryIndex--;
+        _progress = 0.0;
+      });
+      if (_storyController.hasClients) {
+        _storyController.previousPage(
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeInOut,
+        );
+      } else {
+        _storyController.jumpToPage(_currentStoryIndex);
+      }
+      _setupCurrentStoryMedia(
+          widget.storyGroups[_currentGroupIndex].stories[_currentStoryIndex]);
+      _startAutoPlay();
+    } else {
+      _previousGroup();
+    }
+  }
+
+  void _nextGroup() {
+    if (_currentGroupIndex < widget.storyGroups.length - 1) {
+      setState(() {
+        _currentGroupIndex++;
+        _currentStoryIndex = 0;
+        _progress = 0.0;
+      });
+      if (_pageController.hasClients) {
+        _pageController.nextPage(
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeInOut,
+        );
+      } else {
+        _pageController.jumpToPage(_currentGroupIndex);
+      }
+      if (_storyController.hasClients) {
+        _storyController.jumpToPage(0);
+      }
+      _fetchGroupItems(_currentGroupIndex);
+      _startAutoPlay();
+    } else {
+      Navigator.of(context).pushNamedAndRemoveUntil('/home', (route) => false);
+    }
+  }
+
+  void _previousGroup() {
+    if (_currentGroupIndex > 0) {
+      setState(() {
+        _currentGroupIndex--;
+        final previousGroup = widget.storyGroups[_currentGroupIndex];
+        _currentStoryIndex = previousGroup.stories.length - 1;
+        _progress = 0.0;
+      });
+      if (_pageController.hasClients) {
+        _pageController.previousPage(
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeInOut,
+        );
+      } else {
+        _pageController.jumpToPage(_currentGroupIndex);
+      }
+      if (_storyController.hasClients) {
+        _storyController.jumpToPage(_currentStoryIndex);
+      }
+      _startAutoPlay();
+    } else {
+      Navigator.of(context).pop();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (widget.storyGroups.isEmpty) {
+      return const Scaffold(
+        body: Center(child: Text('No stories available')),
+      );
+    }
+
+    // Read the bottom inset from multiple sources and take the max (Ads page
+    // pattern). `View.padding` is in physical pixels, so convert to logical.
+    final view = View.of(context);
+    final devicePixelRatio = view.devicePixelRatio;
+    double bottomSystemInset = view.padding.bottom / devicePixelRatio;
+    final mq = MediaQuery.of(context);
+    if (mq.viewPadding.bottom > bottomSystemInset) {
+      bottomSystemInset = mq.viewPadding.bottom;
+    }
+    if (mq.padding.bottom > bottomSystemInset) {
+      bottomSystemInset = mq.padding.bottom;
+    }
+    if (_cachedBottomInset > bottomSystemInset) {
+      bottomSystemInset = _cachedBottomInset;
+    }
+    final screenHeight = mq.size.height;
+    const bottomBarHeight = 58.0; // includes padding
+    const bottomGap = 0.0;
+    const storyRadius = 18.0;
+    const storyHorizontalPadding = 6.0;
+    final storyTop = mq.padding.top + 10.0;
+    // Apply the system inset outside the main layout so story/bottom-bar
+    // positioning behaves consistently (like Ads/Reels) and never sits behind
+    // the Android nav bar.
+    const storyBottom = bottomBarHeight + bottomGap;
+
+    final currentGroup = widget.storyGroups[_currentGroupIndex];
+    final currentStory = currentGroup.stories.isNotEmpty
+        ? currentGroup.stories[
+            _currentStoryIndex.clamp(0, currentGroup.stories.length - 1)]
+        : null;
+    final currentAuthorName = _currentStoryAuthorName();
+    final groupStoryId = currentGroup.storyId ?? '';
+    _logStoryDebug(
+      'build group=$_currentGroupIndex storyId=$groupStoryId stories=${currentGroup.stories.length} '
+      'currentStoryIndex=$_currentStoryIndex currentStory=${currentStory?.id ?? 'null'}',
+    );
+    final isExpired = currentStory?.expiresAt != null &&
+        DateTime.now().isAfter(currentStory!.expiresAt!);
+    final isUnavailable =
+        currentStory == null || isExpired || currentStory.isDeleted;
+    final shouldShowInitialLoader = groupStoryId.isNotEmpty &&
+        (currentGroup.stories.isEmpty ||
+            (_fetchingStoryGroupIds.contains(groupStoryId) &&
+                currentGroup.stories.length <= 1));
+
+    return Scaffold(
+      backgroundColor: Colors.black,
+      resizeToAvoidBottomInset: false,
+      body: GestureDetector(
+        onLongPressStart: (_) {
+          _autoPlayTimer?.cancel();
+          if (_videoCtl != null && _videoCtl!.value.isInitialized) {
+            _videoCtl!.pause();
+          }
+          setState(() => _paused = true);
+        },
+        onLongPressEnd: (_) {
+          if (_videoCtl != null &&
+              _videoCtl!.value.isInitialized &&
+              !_videoCtl!.value.isPlaying) {
+            _videoCtl!.play();
+          }
+          setState(() => _paused = false);
+          _startAutoPlay();
+        },
+        onTapUp: (details) {
+          final bottomBarTop =
+              screenHeight - bottomSystemInset - bottomBarHeight;
+          if (details.globalPosition.dy >= bottomBarTop) return;
+          final screenWidth = MediaQuery.of(context).size.width;
+          if (details.globalPosition.dx < screenWidth / 2) {
+            _previousStory();
+          } else {
+            _nextStory();
+          }
+        },
+        onVerticalDragEnd: (details) {
+          if (details.primaryVelocity != null && details.primaryVelocity! > 0) {
+            Navigator.of(context).pop();
+          } else {
+            final s = currentStory;
+            if (s != null && (s.productUrl ?? '').isNotEmpty) {
+              _openProductSheet(s.productUrl!);
+            } else if (s != null && (s.externalLink ?? '').isNotEmpty) {
+              _openLinkSheet(s.externalLink!);
+            } else if (s != null && s.hasPollQuiz) {
+              _openPollSheet();
+            }
+          }
+        },
+        onHorizontalDragEnd: (details) {
+          if (details.primaryVelocity != null) {
+            if (details.primaryVelocity! > 0) {
+              _previousGroup();
+            } else {
+              _nextGroup();
+            }
+          }
+        },
+        child: Padding(
+          padding: EdgeInsets.only(bottom: bottomSystemInset),
+          child: Stack(
+            children: [
+              Positioned(
+                left: storyHorizontalPadding,
+                right: storyHorizontalPadding,
+                top: storyTop,
+                bottom: storyBottom,
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(storyRadius),
+                  child: Stack(
+                    children: [
+                      // Story Content
+                      PageView.builder(
+                        controller: _pageController,
+                        onPageChanged: (index) {
+                          _logStoryDebug(
+                            'pageChanged from=$_currentGroupIndex to=$index',
+                          );
+                          setState(() {
+                            _currentGroupIndex = index;
+                            _currentStoryIndex = 0;
+                            _progress = 0.0;
+                          });
+                          _storyController.jumpToPage(0);
+                          final group = widget.storyGroups[_currentGroupIndex];
+                          if (group.stories.isNotEmpty) {
+                            _setupCurrentStoryMedia(group.stories[0]);
+                          }
+                          _startAutoPlay();
+                        },
+                        itemCount: widget.storyGroups.length,
+                        itemBuilder: (context, groupIndex) {
+                          final group = widget.storyGroups[groupIndex];
+                          return PageView.builder(
+                            controller: groupIndex == _currentGroupIndex
+                                ? _storyController
+                                : PageController(),
+                            itemCount: group.stories.length,
+                            itemBuilder: (context, storyIndex) {
+                              final story = group.stories[storyIndex];
+                              final isActive =
+                                  groupIndex == _currentGroupIndex &&
+                                      storyIndex == _currentStoryIndex;
+                              return _buildStoryContent(story,
+                                  isActive: isActive);
+                            },
+                          );
+                        },
+                      ),
+
+                      if (shouldShowInitialLoader)
+                        Builder(
+                          builder: (_) {
+                            _logStoryDebug(
+                              'showInitialLoader group=$_currentGroupIndex storyId=$groupStoryId stories=${currentGroup.stories.length}',
+                            );
+                            return Positioned.fill(
+                              child: IgnorePointer(
+                                ignoring: true,
+                                child: Container(
+                                  color: Colors.black.withValues(alpha: 0.16),
+                                  child: const Center(
+                                    child: SizedBox(
+                                      width: 36,
+                                      height: 36,
+                                      child: CircularProgressIndicator(
+                                        color: Colors.white,
+                                        strokeWidth: 2.5,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+
+                      // Progress Bar + header
+                      Positioned(
+                        top: 10,
+                        left: 10,
+                        right: 10,
+                        child: Column(
+                          children: [
+                            if (_isOffline && _offlineRetryAttempts >= 2)
+                              const Padding(
+                                padding: EdgeInsets.only(bottom: 8),
+                                child: OfflineRetryBanner(
+                                  message:
+                                      "You're offline, please check your internet connection",
+                                ),
+                              ),
+                            Row(
+                              children: List.generate(
+                                currentGroup.stories.length,
+                                (index) => Expanded(
+                                  child: Container(
+                                    height: 2,
+                                    margin: const EdgeInsets.symmetric(
+                                        horizontal: 2),
+                                    decoration: BoxDecoration(
+                                      color:
+                                          Colors.white.withValues(alpha: 0.3),
+                                      borderRadius: BorderRadius.circular(1),
+                                    ),
+                                    child: index == _currentStoryIndex
+                                        ? FractionallySizedBox(
+                                            alignment: Alignment.centerLeft,
+                                            widthFactor: _progress,
+                                            child: Container(
+                                              decoration: BoxDecoration(
+                                                color: Colors.white,
+                                                borderRadius:
+                                                    BorderRadius.circular(1),
+                                              ),
+                                            ),
+                                          )
+                                        : index < _currentStoryIndex
+                                            ? Container(color: Colors.white)
+                                            : null,
+                                  ),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(height: 10),
+                            Row(
+                              children: [
+                                InkWell(
+                                  onTap: currentGroup.userId.isNotEmpty
+                                      ? () => Navigator.of(context).pushNamed(
+                                            '/profile/${currentGroup.userId}',
+                                          )
+                                      : null,
+                                  borderRadius: BorderRadius.circular(24),
+                                  child: Row(
+                                    children: [
+                                      CircleAvatar(
+                                        radius: 18,
+                                        backgroundColor: Colors.blue,
+                                        child: Text(
+                                          currentAuthorName.isNotEmpty
+                                              ? currentAuthorName[0]
+                                                  .toUpperCase()
+                                              : '?',
+                                          style: const TextStyle(
+                                              color: Colors.white),
+                                        ),
+                                      ),
+                                      const SizedBox(width: 8),
+                                      Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          Text(
+                                            currentAuthorName,
+                                            style: const TextStyle(
+                                              color: Colors.white,
+                                              fontWeight: FontWeight.bold,
+                                            ),
+                                          ),
+                                          const SizedBox(height: 2),
+                                          Text(
+                                            _formatTimestamp(
+                                                currentStory?.createdAt ??
+                                                    DateTime.now()),
+                                            style: TextStyle(
+                                              color: Colors.white
+                                                  .withValues(alpha: 0.7),
+                                              fontSize: 12,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                const Spacer(),
+                                PopupMenuButton<String>(
+                                  icon: const Icon(Icons.more_horiz,
+                                      color: Colors.white),
+                                  onSelected: (value) {
+                                    if (value == 'report') {
+                                      final storyId =
+                                          currentStory?.id.trim() ?? '';
+                                      if (storyId.isNotEmpty) {
+                                        ContentReportSheet.show(
+                                          context,
+                                          contentType: 'story',
+                                          contentId: storyId,
+                                        );
+                                      }
+                                    } else if (value == 'mute') {
+                                      ScaffoldMessenger.of(context)
+                                          .showSnackBar(
+                                        SnackBar(
+                                          content: Text(
+                                            'Mute $currentAuthorName\'s story coming soon',
+                                          ),
+                                        ),
+                                      );
+                                    } else if (value == 'close_friends') {
+                                      ScaffoldMessenger.of(context)
+                                          .showSnackBar(
+                                        const SnackBar(
+                                          content: Text(
+                                            'Close Friends action coming soon',
+                                          ),
+                                        ),
+                                      );
+                                    }
+                                  },
+                                  itemBuilder: (_) => [
+                                    const PopupMenuItem(
+                                        value: 'report', child: Text('Report')),
+                                    PopupMenuItem(
+                                      value: 'mute',
+                                      child: Text(
+                                          'Mute $currentAuthorName\'s story'),
+                                    ),
+                                    if (currentGroup.isCloseFriend)
+                                      const PopupMenuItem(
+                                        value: 'close_friends',
+                                        child: Text('Close Friends'),
+                                      ),
+                                  ],
+                                ),
+                                IconButton(
+                                  icon: const Icon(LucideIcons.x,
+                                      color: Colors.white),
+                                  onPressed: () => Navigator.of(context).pop(),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                      if (isUnavailable)
+                        Positioned.fill(
+                          child: Container(
+                            color: Colors.black.withAlpha(160),
+                            child: Center(
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  const Icon(
+                                    Icons.error_outline,
+                                    color: Colors.white70,
+                                    size: 48,
+                                  ),
+                                  const SizedBox(height: 12),
+                                  Text(
+                                    isExpired
+                                        ? 'This story has expired'
+                                        : 'This story is no longer available',
+                                    style: const TextStyle(color: Colors.white),
+                                  ),
+                                  const SizedBox(height: 8),
+                                  ElevatedButton(
+                                    onPressed: _nextGroup,
+                                    child: const Text('Next story'),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+              ),
+              // Bottom message bar (Instagram-like, no extra black gap)
+              Positioned(
+                left: 0,
+                right: 0,
+                bottom: 0,
+                child: _buildBottomBar(),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildBottomBar() {
+    final story = _currentStory();
+    final canLike = story != null &&
+        (_currentUserId == null || _currentUserId != story.userId);
+    final showReplyBar = _canShowReplyBar(story);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(6, 10, 6, 0),
+      child: Row(
+        children: [
+          if (showReplyBar) ...[
+            Expanded(
+              child: Container(
+                decoration: BoxDecoration(
+                  color: Colors.black.withValues(alpha: 0.35),
+                  borderRadius: BorderRadius.circular(999),
+                  border: Border.all(
+                    color: Colors.white.withValues(alpha: 0.22),
+                  ),
+                ),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 2,
+                ),
+                child: const TextField(
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w500,
+                  ),
+                  cursorColor: Colors.white,
+                  decoration: InputDecoration(
+                    hintText: 'Send message',
+                    hintStyle: TextStyle(color: Colors.white54),
+                    border: InputBorder.none,
+                    isDense: true,
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(width: 10),
+          ],
+          IconButton(
+            onPressed: canLike ? _toggleStoryLike : null,
+            icon: Icon(
+              _isCurrentStoryLiked() ? Icons.favorite : LucideIcons.heart,
+              color: _isCurrentStoryLiked()
+                  ? Colors.redAccent
+                  : (canLike ? Colors.white : Colors.white38),
+            ),
+          ),
+          IconButton(
+            onPressed: () {},
+            icon: const Icon(LucideIcons.send, color: Colors.white),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _quickAddStory() async {
+    try {
+      final source = await showModalBottomSheet<ImageSource>(
+        context: context,
+        builder: (ctx) => SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(
+                leading: const Icon(Icons.camera_alt),
+                title: const Text('Use Camera'),
+                onTap: () => Navigator.pop(ctx, ImageSource.camera),
+              ),
+              ListTile(
+                leading: const Icon(Icons.photo_library),
+                title: const Text('Choose from Gallery'),
+                onTap: () => Navigator.pop(ctx, ImageSource.gallery),
+              ),
+            ],
+          ),
+        ),
+      );
+      if (source == null) return;
+      final picker = ImagePicker();
+      final xfile = await picker.pickImage(source: source, imageQuality: 100);
+      if (xfile == null) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('Uploading...')));
+      final bytes = await xfile.readAsBytes();
+      final upload = await UploadApi()
+          .uploadStoryBytes(bytes: bytes.toList(), filename: 'story.jpg');
+      final url = (upload['fileUrl'] as String?) ??
+          (upload['url'] as String?) ??
+          (upload['file_url'] as String?) ??
+          (upload['data'] is Map ? (upload['data']['url'] as String?) : null) ??
+          '';
+      if (url.isEmpty) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(const SnackBar(content: Text('Upload failed')));
+        return;
+      }
+      final payload = {
+        'media': {'url': url, 'type': 'image'},
+        'transform': {'x': 0.5, 'y': 0.5, 'scale': 1, 'rotation': 0},
+        'filter': {'name': 'none', 'intensity': 0},
+        'texts': [],
+        'mentions': [],
+      };
+      await StoriesApi().createFlexible([payload]);
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('Posted to your story')));
+    } catch (e) {
+      final msg = e is ApiException ? e.message : 'Failed to add story';
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+    }
+  }
+
+  Future<void> _fetchGroupItems(int groupIndex) async {
+    final g = widget.storyGroups[groupIndex];
+    final sid = g.storyId;
+    if (sid == null || sid.isEmpty) return;
+    if (_fetchingStoryGroupIds.contains(sid)) return;
+    _fetchingStoryGroupIds.add(sid);
+    _logStoryDebug(
+      'fetchGroupItems start group=$groupIndex storyId=$sid previewItems=${g.stories.length}',
+    );
+    try {
+      final items = await _feedService.fetchStoryItems(sid,
+          ownerUserName: g.userName, ownerAvatar: g.userAvatar);
+      _logStoryDebug(
+        'fetchGroupItems success storyId=$sid items=${items.length}',
+      );
+      setState(() {
+        widget.storyGroups[groupIndex] = StoryGroup(
+          userId: g.userId,
+          userName: g.userName,
+          userAvatar: g.userAvatar,
+          isOnline: g.isOnline,
+          isCloseFriend: g.isCloseFriend,
+          isSubscribedCreator: g.isSubscribedCreator,
+          storyId: g.storyId,
+          stories: items,
+        );
+        _currentStoryIndex = 0;
+        _progress = 0.0;
+        _offlineRetryAttempts = 0;
+      });
+      if (items.isNotEmpty) {
+        _syncLikedStateForStory(items.first);
+      }
+      _startAutoPlay();
+    } catch (_) {
+      _logStoryDebug('fetchGroupItems failed storyId=$sid');
+      final offline = await _isCurrentlyOffline();
+      if (!mounted) return;
+      setState(() {
+        _isOffline = offline;
+        if (offline) {
+          _offlineRetryAttempts++;
+        }
+      });
+    } finally {
+      _fetchingStoryGroupIds.remove(sid);
+      _logStoryDebug('fetchGroupItems end storyId=$sid');
+      if (mounted) {
+        setState(() {});
+      }
+    }
+  }
+
+  Widget _buildStoryContent(Story story, {required bool isActive}) {
+    final isImage = story.mediaType == StoryMediaType.image;
+    final hasUrl = story.mediaUrl.isNotEmpty &&
+        (story.mediaUrl.startsWith('http://') ||
+            story.mediaUrl.startsWith('https://'));
+    final mediaHeaders =
+        UrlHelper.shouldAttachAuthHeader(story.mediaUrl) ? _videoHeaders : null;
+    final posterUrl = story.thumbnailUrl ?? '';
+    final normalizedUrl = story.mediaUrl.isNotEmpty
+        ? UrlHelper.normalizeUrl(story.mediaUrl)
+        : story.mediaUrl;
+    final cached =
+        StoryCache.get(normalizedUrl) ?? StoryCache.getById(story.id);
+    final cachedTexts = cached?['texts'] as List<dynamic>?;
+    final cachedMentions = cached?['mentions'] as List<dynamic>?;
+    _logStoryDebug(
+      'buildStoryContent story=${story.id} active=$isActive type=${story.mediaType} '
+      'hasUrl=$hasUrl texts=${story.texts?.length ?? 0} mentions=${story.mentions?.length ?? 0} '
+      'cachedTexts=${cachedTexts?.length ?? 0} cachedMentions=${cachedMentions?.length ?? 0}',
+    );
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final cw = constraints.maxWidth;
+        final ch = constraints.maxHeight;
+        final texts = (story.texts == null || story.texts!.isEmpty)
+            ? (cachedTexts ?? const [])
+            : story.texts!;
+        final mentions = (story.mentions == null || story.mentions!.isEmpty)
+            ? (cachedMentions ?? const [])
+            : story.mentions!;
+        return Stack(
+          children: [
+            Positioned.fill(
+              child: Container(
+                color: Colors.black,
+                child: isImage && hasUrl
+                    ? CachedNetworkImage(
+                        imageUrl: story.mediaUrl,
+                        httpHeaders: mediaHeaders,
+                        fit: BoxFit.cover,
+                        placeholder: (_, __) => const Center(
+                            child:
+                                CircularProgressIndicator(color: Colors.white)),
+                        errorWidget: (_, __, ___) => const Center(
+                            child: Icon(LucideIcons.image,
+                                size: 100, color: Colors.white54)),
+                      )
+                    : (story.mediaType == StoryMediaType.video && hasUrl)
+                        ? Stack(
+                            fit: StackFit.expand,
+                            children: [
+                              if (posterUrl.isNotEmpty)
+                                CachedNetworkImage(
+                                  imageUrl: posterUrl,
+                                  httpHeaders: mediaHeaders,
+                                  fit: BoxFit.cover,
+                                  placeholder: (_, __) =>
+                                      Container(color: Colors.black),
+                                  errorWidget: (_, __, ___) =>
+                                      Container(color: Colors.black),
+                                )
+                              else
+                                Container(color: Colors.black),
+                              if (isActive &&
+                                  _videoCtl != null &&
+                                  _videoCtl!.value.isInitialized &&
+                                  _videoStoryId == story.id)
+                                FittedBox(
+                                  fit: BoxFit.cover,
+                                  child: SizedBox(
+                                    width: _videoCtl!.value.size.width,
+                                    height: _videoCtl!.value.size.height,
+                                    child: VideoPlayer(_videoCtl!),
+                                  ),
+                                ),
+                              if (isActive &&
+                                  (_videoCtl == null ||
+                                      _videoStoryId != story.id ||
+                                      !_videoCtl!.value.isInitialized ||
+                                      _videoCtl!.value.isBuffering))
+                                const Center(
+                                  child: SizedBox(
+                                    width: 24,
+                                    height: 24,
+                                    child: CircularProgressIndicator(
+                                        color: Colors.white, strokeWidth: 2),
+                                  ),
+                                ),
+                            ],
+                          )
+                        : const SizedBox.shrink(),
+              ),
+            ),
+            ...((texts).asMap().entries.map((e) {
+              final t = e.value as Map? ?? const {};
+              final left = ((t['x'] as num?) ?? 0) * cw;
+              final top = ((t['y'] as num?) ?? 0) * ch;
+              final clampedLeft = left.clamp(0.0, cw - 8);
+              final clampedTop = top.clamp(0.0, ch - 8);
+              final content = (t['content'] as String?) ?? '';
+              final tappedMention = _mentionUsernameFromText(content);
+              final fontSize = (t['fontSize'] as num?)?.toDouble() ?? 20.0;
+              final color = _parseStoryColor(t['color']);
+              final align = (t['align'] as String?) ?? 'center';
+              final rotation = (t['rotation'] as num?)?.toDouble() ?? 0.0;
+              TextAlign textAlign = TextAlign.center;
+              if (align == 'left') textAlign = TextAlign.left;
+              if (align == 'right') textAlign = TextAlign.right;
+              return Positioned(
+                left: clampedLeft,
+                top: clampedTop,
+                child: Transform.rotate(
+                  angle: rotation,
+                  child: GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTap: tappedMention == null
+                        ? null
+                        : () =>
+                            _openMentionProfile({'username': tappedMention}),
+                    child: ConstrainedBox(
+                      constraints: BoxConstraints(maxWidth: cw - 24),
+                      child: Text(
+                        content,
+                        textAlign: textAlign,
+                        style: TextStyle(
+                          color: color ?? Colors.white,
+                          fontSize: fontSize,
+                          fontWeight: FontWeight.w600,
+                          shadows: const [
+                            Shadow(
+                              offset: Offset(0, 1),
+                              blurRadius: 3,
+                              color: Color(0xAA000000),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              );
+            }).toList()),
+            ..._buildMentionOverlays(mentions, texts, cw, ch),
+          ],
+        );
+      },
+    );
+  }
+
+  String? _mentionUsernameFromText(String content) {
+    final match = RegExp(r'@([A-Za-z0-9_\.]+)').firstMatch(content);
+    final username = match?.group(1)?.trim();
+    return (username != null && username.isNotEmpty) ? username : null;
+  }
+
+  bool _storyTextContainsUsername(List<dynamic> textData, String username) {
+    if (username.trim().isEmpty) return false;
+    for (final t in textData) {
+      final content = (t['content'] as String?) ?? '';
+      if (content.contains('@$username')) return true;
+    }
+    return false;
+  }
+
+  List<Widget> _buildMentionOverlays(
+    List<dynamic> mentionData,
+    List<dynamic> textData,
+    double cw,
+    double ch,
+  ) {
+    if (mentionData.isNotEmpty) {
+      return mentionData.map((m) {
+        final left = ((m['x'] as num?) ?? 0) * cw;
+        final top = ((m['y'] as num?) ?? 0) * ch;
+        final username = (m['username'] as String?) ?? '';
+        if (_storyTextContainsUsername(textData, username)) {
+          return const SizedBox.shrink();
+        }
+        final scale = _mentionScaleFor(username, textData);
+        return Positioned(
+          left: left.clamp(0, cw - 8),
+          top: (top - (18 * scale) - 4).clamp(0, ch - 8),
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: () => _openMentionProfile(Map<String, dynamic>.from(m)),
+            child: _mentionChip(username, scale: scale),
+          ),
+        );
+      }).toList();
+    }
+
+    // Fallback: derive mentions from text content if API didn't send mentions.
+    final exp = RegExp(r'@([A-Za-z0-9_\\.]+)');
+    final widgets = <Widget>[];
+    for (final t in textData) {
+      final content = (t['content'] as String?) ?? '';
+      final match = exp.firstMatch(content);
+      if (match == null) continue;
+      final username = match.group(1) ?? '';
+      if (username.isEmpty) continue;
+      final left = ((t['x'] as num?) ?? 0) * cw;
+      final top = ((t['y'] as num?) ?? 0) * ch;
+      widgets.add(
+        Positioned(
+          left: left.clamp(0, cw - 8),
+          top: (top - (18 * 1.0) - 4).clamp(0, ch - 8),
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: () => _openMentionProfile({'username': username}),
+            child: _mentionChip(username, scale: 1.0),
+          ),
+        ),
+      );
+    }
+    return widgets;
+  }
+
+  double _mentionScaleFor(String username, List<dynamic> textData) {
+    if (username.isEmpty) return 1.0;
+    for (final t in textData) {
+      final content = (t['content'] as String?) ?? '';
+      if (content.contains('@$username')) {
+        final size = (t['fontSize'] as num?)?.toDouble() ?? 32.0;
+        return (size / 32.0).clamp(0.6, 1.4);
+      }
+    }
+    return 1.0;
+  }
+
+  String _mentionUserId(Map<String, dynamic> mention) {
+    return extractEntityId(mention) ?? '';
+  }
+
+  String? _mentionUserRole(Map<String, dynamic> mention) {
+    final direct =
+        (mention['role'] ?? mention['user_role'] ?? mention['userRole'])
+            ?.toString();
+    if (direct != null && direct.trim().isNotEmpty) return direct.trim();
+    final user = mention['user'];
+    if (user is Map) {
+      final u = Map<String, dynamic>.from(user);
+      final nested = (u['role'] ?? u['user_role'] ?? u['userRole'])?.toString();
+      if (nested != null && nested.trim().isNotEmpty) return nested.trim();
+    }
+    return null;
+  }
+
+  Future<void> _openMentionProfile(Map<String, dynamic> mention) async {
+    final username = (mention['username'] as String?)?.trim() ?? '';
+    final userId = _mentionUserId(mention);
+    final role = _mentionUserRole(mention)?.toLowerCase();
+    String? route;
+    if (userId.isNotEmpty) {
+      route = role == 'vendor' ? '/vendor/$userId/public' : '/profile/$userId';
+    } else if (username.isNotEmpty) {
+      try {
+        final results = await UsersApi().search(username);
+        final match = results.firstWhere(
+          (u) =>
+              (u['username']?.toString().toLowerCase() ?? '') ==
+              username.toLowerCase(),
+          orElse: () => const {},
+        );
+        final resolvedId =
+            (match['id'] as String?) ?? (match['_id'] as String?) ?? '';
+        final resolvedRole =
+            (match['role'] ?? match['user_role'] ?? match['type'])
+                ?.toString()
+                .toLowerCase();
+        if (resolvedId.isNotEmpty) {
+          route = resolvedRole == 'vendor'
+              ? '/vendor/$resolvedId/public'
+              : '/profile/$resolvedId';
+        }
+      } catch (_) {
+        route = null;
+      }
+    }
+    if (route == null || !mounted) return;
+    await Navigator.of(context).pushNamed(route);
+  }
+
+  Widget _mentionChip(String username, {double scale = 1.0}) {
+    final clamped = scale.clamp(0.6, 1.4);
+    return Text(
+      '@$username',
+      style: TextStyle(
+        color: Colors.white,
+        fontSize: 12 * clamped,
+        fontWeight: FontWeight.w600,
+        shadows: const [
+          Shadow(
+            offset: Offset(0, 1),
+            blurRadius: 3,
+            color: Color(0xAA000000),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Color? _parseStoryColor(dynamic value) {
+    if (value == null) return null;
+    final raw = value.toString().trim();
+    if (raw.isEmpty) return null;
+    final lower = raw.toLowerCase();
+    if (lower == 'white') return Colors.white;
+    if (lower == 'black') return Colors.black;
+    var hex = raw.startsWith('#') ? raw.substring(1) : raw;
+    if (hex.length == 6) {
+      hex = 'FF$hex';
+    }
+    if (hex.length != 8) return null;
+    final parsed = int.tryParse(hex, radix: 16);
+    if (parsed == null) return null;
+    return Color(parsed);
+  }
+
+  void _setupCurrentStoryMedia(Story story) async {
+    final requestId = ++_videoRequestSerial;
+    final oldCtl = _videoCtl;
+    _videoCtl = null;
+    _videoStoryId = null;
+    _initVideo = null;
+    _logStoryDebug(
+      'setupMedia story=${story.id} type=${story.mediaType} url=${story.mediaUrl} request=$requestId',
+    );
+    if (oldCtl != null) {
+      // Ensure the widget tree can drop any VideoPlayer that references the
+      // old controller before disposal.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        oldCtl.dispose();
+      });
+    }
+    if (story.mediaType == StoryMediaType.video && story.mediaUrl.isNotEmpty) {
+      final headers = UrlHelper.shouldAttachAuthHeader(story.mediaUrl)
+          ? (_videoHeaders ?? const <String, String>{})
+          : const <String, String>{};
+      try {
+        final uri = Uri.parse(story.mediaUrl);
+        final ctl = VideoPlayerController.networkUrl(uri, httpHeaders: headers);
+        _videoCtl = ctl;
+        _videoStoryId = story.id;
+        _logStoryDebug('setupMedia initializing video story=${story.id}');
+        _initVideo = ctl.initialize().then((_) {
+          if (!mounted) return;
+          if (requestId != _videoRequestSerial) {
+            _logStoryDebug(
+              'setupMedia stale init ignored story=${story.id} request=$requestId current=$_videoRequestSerial',
+            );
+            ctl.dispose();
+            return;
+          }
+          _logStoryDebug('setupMedia initialized story=${story.id}');
+          ctl.setLooping(false);
+          ctl.setVolume(0);
+          ctl.play();
+          ctl.addListener(() {
+            if (!mounted) return;
+            if (requestId != _videoRequestSerial) return;
+            final v = ctl.value;
+            if (!v.isInitialized) return;
+            if (v.duration.inMilliseconds <= 0) return;
+            if (v.position >= v.duration && _endedStoryId != story.id) {
+              _endedStoryId = story.id;
+              _autoPlayTimer?.cancel();
+              _nextStory();
+            }
+          });
+          setState(() {
+            _offlineRetryAttempts = 0;
+          });
+          if (_waitingForMedia && _pendingStoryId == story.id) {
+            _waitingForMedia = false;
+            _startAutoPlayTimer(story);
+          }
+        });
+      } catch (_) {
+        _logStoryDebug('setupMedia failed story=${story.id}');
+        final offline = await _isCurrentlyOffline();
+        if (mounted) {
+          setState(() {
+            _isOffline = offline;
+            if (offline) {
+              _offlineRetryAttempts++;
+            }
+          });
+        }
+      }
+    } else {
+      _waitingForMedia = false;
+      if (mounted) setState(() {});
+    }
+  }
+
+  void _openProductSheet(String url) {
+    showModalBottomSheet(
+      context: context,
+      builder: (_) => Container(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [const Text('Product'), Text(url)]),
+      ),
+    );
+  }
+
+  void _openLinkSheet(String url) {
+    showModalBottomSheet(
+      context: context,
+      builder: (_) => Container(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [const Text('Link'), Text(url)]),
+      ),
+    );
+  }
+
+  void _openPollSheet() {
+    showModalBottomSheet(
+      context: context,
+      builder: (_) => Container(
+        padding: const EdgeInsets.all(16),
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          const Text('Poll / Quiz'),
+          ElevatedButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Vote')),
+        ]),
+      ),
+    );
+  }
+
+  Story? _currentStory() {
+    if (widget.storyGroups.isEmpty) return null;
+    final group = widget.storyGroups[_currentGroupIndex];
+    if (group.stories.isEmpty) return null;
+    final idx = _currentStoryIndex.clamp(0, group.stories.length - 1);
+    return group.stories[idx];
+  }
+
+  String _currentStoryAuthorName() {
+    final groupName = widget.storyGroups.isEmpty
+        ? ''
+        : widget.storyGroups[_currentGroupIndex].userName.trim();
+    if (groupName.isNotEmpty) return groupName;
+    final storyName = _currentStory()?.userName.trim() ?? '';
+    if (storyName.isNotEmpty) return storyName;
+    return 'User';
+  }
+
+  bool _isCurrentStoryLiked() {
+    final story = _currentStory();
+    if (story == null) return false;
+    if (_likedItemIds.contains(story.id)) return true;
+    final cachedLiked = _cachedLikeStateForStory(story);
+    return cachedLiked ?? false;
+  }
+
+  bool? _boolFromAny(dynamic value) {
+    if (value is bool) return value;
+    if (value is num) return value != 0;
+    if (value is String) {
+      final normalized = value.trim().toLowerCase();
+      if (normalized.isEmpty) return null;
+      if (['true', '1', 'yes', 'y'].contains(normalized)) return true;
+      if (['false', '0', 'no', 'n'].contains(normalized)) return false;
+    }
+    return null;
+  }
+
+  int? _intFromAny(dynamic value) {
+    if (value is int) return value;
+    if (value is num) return value.toInt();
+    if (value is String) return int.tryParse(value.trim());
+    return null;
+  }
+
+  bool? _cachedLikeStateForStory(Story story) {
+    final normalizedUrl =
+        story.mediaUrl.isNotEmpty ? UrlHelper.normalizeUrl(story.mediaUrl) : '';
+    final cached = StoryCache.getById(story.id) ??
+        (normalizedUrl.isNotEmpty ? StoryCache.get(normalizedUrl) : null);
+    if (cached == null) return null;
+    return _boolFromAny(
+      cached['liked'] ??
+          cached['is_liked'] ??
+          cached['liked_by_me'] ??
+          cached['is_liked_by_me'],
+    );
+  }
+
+  void _syncLikedStateForStory(Story? story) {
+    if (story == null) return;
+    final cachedLiked = _cachedLikeStateForStory(story);
+    if (cachedLiked == null) return;
+    if (cachedLiked) {
+      _likedItemIds.add(story.id);
+    } else {
+      _likedItemIds.remove(story.id);
+    }
+  }
+
+  void _updateStoryLikeCache(String itemId, bool liked, int? likesCount) {
+    final existing = StoryCache.getById(itemId) ?? const <String, dynamic>{};
+    StoryCache.putById(itemId, <String, dynamic>{
+      ...existing,
+      'liked': liked,
+      'is_liked': liked,
+      'liked_by_me': liked,
+      'is_liked_by_me': liked,
+      if (likesCount != null) 'likes_count': likesCount,
+      if (likesCount != null) 'likesCount': likesCount,
+    });
+  }
+
+  Future<void> _toggleStoryLike() async {
+    final story = _currentStory();
+    if (story == null) return;
+    if (_currentUserId != null && _currentUserId == story.userId) return;
+    final hasToken = await ApiClient().hasToken;
+    if (!hasToken) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please log in to like stories')),
+      );
+      return;
+    }
+
+    final itemId = story.id.trim();
+    if (itemId.isEmpty) return;
+    final liked = _likedItemIds.contains(itemId);
+    setState(() {
+      if (liked) {
+        _likedItemIds.remove(itemId);
+      } else {
+        _likedItemIds.add(itemId);
+      }
+    });
+
+    try {
+      final res = await _storiesApi.likeItem(itemId);
+      if (!mounted) return;
+      final likedNow = _boolFromAny(res['liked']) ??
+          _boolFromAny(res['liked_by_me']) ??
+          _boolFromAny(res['is_liked']) ??
+          _boolFromAny(res['is_liked_by_me']) ??
+          !liked;
+      final likesCount = _intFromAny(res['likes_count'] ?? res['likesCount']);
+      _updateStoryLikeCache(itemId, likedNow, likesCount);
+      setState(() {
+        if (likedNow) {
+          _likedItemIds.add(itemId);
+        } else {
+          _likedItemIds.remove(itemId);
+        }
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        if (liked) {
+          _likedItemIds.add(itemId);
+        } else {
+          _likedItemIds.remove(itemId);
+        }
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Failed to like story')),
+      );
+    }
+  }
+
+  String _formatTimestamp(DateTime date) {
+    final formatted = TimezoneService.instance.relativeTime(date);
+    return formatted.isEmpty ? 'Just now' : formatted;
+  }
+
+  TextAlign _toAlign(String a) {
+    switch (a) {
+      case 'center':
+        return TextAlign.center;
+      case 'right':
+        return TextAlign.right;
+      default:
+        return TextAlign.left;
+    }
+  }
+}

@@ -1,0 +1,56 @@
+# Flutter / Dart
+# =========================
+.dart_tool/
+.pub/
+.pub-cache/
+build/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+
+# =========================
+# IDE
+# =========================
+.idea/
+.vscode/
+
+# =========================
+# macOS
+# =========================
+.DS_Store
+
+# =========================
+# Android
+# =========================
+**/android/.gradle/
+**/android/local.properties
+**/android/app/debug/
+**/android/app/profile/
+**/android/app/release/
+
+# =========================
+# iOS
+# =========================
+**/ios/Pods/
+**/ios/.symlinks/
+**/ios/Flutter/ephemeral/
+**/ios/Flutter/Generated.xcconfig
+**/ios/Flutter/flutter_export_environment.sh
+
+# =========================
+# Generated / build files
+# =========================
+*.class
+*.aar
+
+# =========================
+# Firebase Admin SDK keys
+# Server-side only — NEVER commit
+# =========================
+*firebase-adminsdk-*.json
+*adminsdk*.json# macOS
+.DS_Store
+
+# Firebase Admin SDK keys (server-side only; never commit to client app repo)
+*firebase-adminsdk-*.json
+*adminsdk*.json

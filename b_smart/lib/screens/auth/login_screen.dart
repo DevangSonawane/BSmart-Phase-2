@@ -1,0 +1,104 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_redux/flutter_redux.dart';
+import '../../state/app_state.dart';
+import '../../state/auth_actions.dart';
+import '../../services/auth/auth_service.dart';
+import '../../utils/app_error_handler.dart';
+
+class LoginScreen extends StatefulWidget {
+  const LoginScreen({super.key});
+
+  @override
+  State<LoginScreen> createState() => _LoginScreenState();
+}
+
+class _LoginScreenState extends State<LoginScreen> {
+  final _identifierController = TextEditingController();
+  final _passwordController = TextEditingController();
+  bool _loading = false;
+  String? _error;
+
+  Color _fieldFillColor(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Theme.of(context).brightness == Brightness.dark
+        ? scheme.surfaceContainerHighest.withValues(alpha: 0.55)
+        : Colors.white;
+  }
+
+  TextStyle _fieldTextStyle(BuildContext context) {
+    return TextStyle(color: Theme.of(context).colorScheme.onSurface);
+  }
+
+  Future<void> _login() async {
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    try {
+      final identifier = _identifierController.text.trim();
+      final password = _passwordController.text;
+      final user = identifier.contains('@')
+          ? await AuthService().loginWithEmail(identifier, password)
+          : await AuthService().loginWithUsername(identifier, password);
+      if (!mounted) return;
+      // Dispatch to store
+      StoreProvider.of<AppState>(context).dispatch(SetAuthenticated(user.id));
+    } catch (e, st) {
+      AppErrorHandler.logError('legacy-login', e, st);
+      setState(() {
+        _error = AppErrorHandler.userMessage(
+          e,
+          fallback: 'Unable to sign in. Please try again.',
+        );
+      });
+    } finally {
+      if (mounted) {
+        setState(() {
+          _loading = false;
+        });
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Login')),
+      body: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          children: [
+            TextField(
+              controller: _identifierController,
+              style: _fieldTextStyle(context),
+              decoration: const InputDecoration(
+                labelText: 'Username',
+                hintText: 'Email, Phone, or Username',
+              ).copyWith(
+                filled: true,
+                fillColor: _fieldFillColor(context),
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _passwordController,
+              style: _fieldTextStyle(context),
+              decoration: InputDecoration(
+                labelText: 'Password',
+                filled: true,
+                fillColor: _fieldFillColor(context),
+              ),
+              obscureText: true,
+            ),
+            const SizedBox(height: 20),
+            if (_error != null) Text(_error!, style: const TextStyle(color: Colors.red)),
+            ElevatedButton(
+              onPressed: _loading ? null : _login,
+              child: _loading ? const CircularProgressIndicator() : const Text('Login'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}

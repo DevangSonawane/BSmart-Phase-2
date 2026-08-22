@@ -1,0 +1,575 @@
+import 'dart:async';
+import 'dart:math';
+import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
+import 'package:google_sign_in/google_sign_in.dart';
+import '../../api/api.dart';
+import '../../models/auth/auth_user_model.dart' as model;
+import '../../models/auth/signup_session_model.dart';
+import '../../utils/validators.dart';
+import '../../utils/constants.dart';
+import '../../utils/timezone_service.dart';
+import '../push_service.dart';
+import '../session_reset_service.dart';
+
+class AuthLoginOutcome {
+  final bool requires2fa;
+  final String? email;
+  final String? message;
+  final model.AuthUser? user;
+
+  const AuthLoginOutcome({
+    required this.requires2fa,
+    this.email,
+    this.message,
+    this.user,
+  });
+}
+
+class RestrictedLoginException implements Exception {
+  final String message;
+  const RestrictedLoginException(this.message);
+
+  @override
+  String toString() => message;
+}
+
+class AuthService {
+  static final AuthService _instance = AuthService._internal();
+  factory AuthService() => _instance;
+
+  static const Set<String> _restrictedLoginRoles = {
+    'vendor',
+    'advertiser',
+    'ads',
+  };
+  static const String _restrictedLoginMessage =
+      'This account is for vendors/ads. Please use the web app to sign in.';
+
+  final AuthApi _authApi = AuthApi();
+  final ApiClient _apiClient = ApiClient();
+  final GoogleSignIn _googleSignIn = GoogleSignIn(
+    scopes: ['email', 'https://www.googleapis.com/auth/userinfo.profile'],
+    serverClientId:
+        '832065490130-97j2a560l5e30p3tu90j9miqfdkdctlv.apps.googleusercontent.com',
+  );
+
+  // In-memory storage for signup sessions during the flow
+  final Map<String, SignupSession> _sessions = {};
+
+  AuthService._internal();
+
+  Future<void> _resetGoogleSessionForInteractiveSignIn() async {
+    try {
+      await _googleSignIn.disconnect();
+    } catch (_) {
+      try {
+        await _googleSignIn.signOut();
+      } catch (_) {}
+    }
+  }
+
+  // ==================== SIGNUP METHODS ====================
+
+  // Signup with email - Step 1
+  Future<SignupSession> signupWithEmail(String email, String password) async {
+    final sessionToken = _generateSessionToken();
+    final now = DateTime.now();
+    await TimezoneService.instance.captureDeviceTimezone();
+
+    final session = SignupSession(
+      id: sessionToken,
+      sessionToken: sessionToken,
+      identifierType: IdentifierType.email,
+      identifierValue: email,
+      verificationStatus: VerificationStatus.verified,
+      step: 1,
+      metadata: {
+        'email': email,
+        'password': password,
+      },
+      createdAt: now,
+      expiresAt: now.add(const Duration(hours: 1)),
+    );
+
+    _sessions[sessionToken] = session;
+    return session;
+  }
+
+  // Signup with phone - Step 1
+  Future<SignupSession> signupWithPhone(String phone) async {
+    final sessionToken = _generateSessionToken();
+    final now = DateTime.now();
+    await TimezoneService.instance.captureDeviceTimezone();
+
+    final session = SignupSession(
+      id: sessionToken,
+      sessionToken: sessionToken,
+      identifierType: IdentifierType.phone,
+      identifierValue: phone,
+      verificationStatus: VerificationStatus.verified,
+      step: 1,
+      metadata: {
+        'phone': phone,
+      },
+      createdAt: now,
+      expiresAt: now.add(const Duration(hours: 1)),
+    );
+
+    _sessions[sessionToken] = session;
+    return session;
+  }
+
+  Future<String?> loginWithGoogle() async {
+    try {
+      // Force the interactive flow to show the Google account chooser instead
+      // of reusing the previously selected account.
+      await _resetGoogleSessionForInteractiveSignIn();
+
+      final googleUser = await _googleSignIn.signIn();
+      if (googleUser == null) return null;
+
+      final googleAuth = await googleUser.authentication;
+      final idToken = googleAuth.idToken;
+      if (idToken == null || idToken.isEmpty) {
+        throw Exception('Google sign-in did not return an ID token.');
+      }
+
+      debugPrint(
+        'Google sign-in success for ${googleUser.email}. Exchanging ID token with backend...',
+      );
+      final timezone = await TimezoneService.instance.captureDeviceTimezone();
+      final data = await _authApi.loginWithGoogle(
+        idToken: idToken,
+        clientTimezoneName: timezone.name,
+        clientTimezoneOffsetMinutes: timezone.offsetMinutes,
+      );
+      final token = data['token'] as String?;
+      if (token == null || token.isEmpty) {
+        throw Exception(
+          'Backend did not return app token after Google login. Response keys: ${data.keys.join(', ')}',
+        );
+      }
+
+      final currentUser = await fetchCurrentUser();
+      if (_isRestrictedLoginRole(currentUser?.role)) {
+        await _clearRestrictedLoginState();
+        throw const RestrictedLoginException(_restrictedLoginMessage);
+      }
+
+      return token;
+    } on RestrictedLoginException {
+      rethrow;
+    } on ApiException catch (e) {
+      throw Exception(
+        'Google login failed at backend exchange (HTTP ${e.statusCode}): ${e.message}',
+      );
+    } on PlatformException catch (e) {
+      if (e.code == 'channel-error') {
+        throw Exception(
+          'Google login native channel is not connected (${e.code}). Rebuild the app fully (flutter clean + flutter pub get + reinstall app) and verify native Google config for this app id.',
+        );
+      }
+      throw Exception(
+        'Google login failed in Android/iOS SDK (${e.code}): ${e.message ?? e.details ?? 'Unknown platform error'}',
+      );
+    } catch (e) {
+      throw Exception('Google login failed: ${e.toString()}');
+    }
+  }
+
+  Future<SignupSession> signupWithGoogle() async {
+    final token = await loginWithGoogle();
+    if (token == null) {
+      throw Exception('Sign up cancelled');
+    }
+
+    final now = DateTime.now();
+    return SignupSession(
+      id: 'google-session',
+      sessionToken: token,
+      identifierType: IdentifierType.email,
+      identifierValue: _googleSignIn.currentUser?.email ?? 'google-user',
+      verificationStatus: VerificationStatus.verified,
+      step: 3, // Completed
+      metadata: {},
+      createdAt: now,
+      expiresAt: now.add(const Duration(hours: 1)),
+    );
+  }
+
+  // Verify OTP - Step 2
+  Future<SignupSession> verifyOTP(String sessionToken, String otp) async {
+    final session = _sessions[sessionToken];
+    if (session == null) throw Exception('Session not found');
+
+    final updatedSession = SignupSession(
+      id: session.id,
+      sessionToken: session.sessionToken,
+      identifierType: session.identifierType,
+      identifierValue: session.identifierValue,
+      otpCode: otp,
+      verificationStatus: VerificationStatus.verified,
+      step: 2,
+      metadata: session.metadata,
+      createdAt: session.createdAt,
+      expiresAt: session.expiresAt,
+    );
+
+    _sessions[sessionToken] = updatedSession;
+    return updatedSession;
+  }
+
+  // Update session metadata (used in Account Setup)
+  Future<void> updateSignupSession(
+    String sessionToken,
+    Map<String, dynamic> updates,
+  ) async {
+    final session = _sessions[sessionToken];
+    if (session == null) throw Exception('Session not found');
+
+    final newMetadata = Map<String, dynamic>.from(session.metadata);
+    if (updates.containsKey('metadata')) {
+      newMetadata.addAll(updates['metadata']);
+    }
+
+    final updatedSession = SignupSession(
+      id: session.id,
+      sessionToken: session.sessionToken,
+      identifierType: session.identifierType,
+      identifierValue: session.identifierValue,
+      verificationStatus: session.verificationStatus,
+      step: updates['step'] ?? session.step,
+      metadata: newMetadata,
+      createdAt: session.createdAt,
+      expiresAt: session.expiresAt,
+    );
+
+    _sessions[sessionToken] = updatedSession;
+  }
+
+  // Check username availability
+  Future<bool> checkUsernameAvailability(String username) async {
+    try {
+      final result = await UsersApi().checkUsernameAvailability(username);
+      return result.available;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  // Complete signup - Final Step
+  Future<model.AuthUser> completeSignup(
+    String sessionToken,
+    String username,
+    String? fullName,
+    String? password,
+    DateTime dateOfBirth,
+  ) async {
+    final session = _sessions[sessionToken];
+    if (session == null) throw Exception('Session not found');
+
+    try {
+      final isUnder18 =
+          Validators.calculateAge(dateOfBirth) < AuthConstants.restrictedAge;
+      final timezone = await TimezoneService.instance.captureDeviceTimezone();
+
+      // For Google signups we don't ask the user for a password.
+      // We derive a deterministic internal password from the Google email so
+      // we can still satisfy the REST API's `email + password` requirement.
+      String? email = session.metadata['email'] as String?;
+      String? pass;
+
+      if (session.identifierType == IdentifierType.google) {
+        if (email == null) {
+          throw Exception('Email is required for Google signup');
+        }
+        pass = _googlePasswordForEmail(email);
+      } else {
+        email ??= session.identifierValue;
+        final storedPass = session.metadata['password'] as String?;
+        pass = password ?? storedPass;
+      }
+
+      if (pass == null) {
+        throw Exception('Email and password are required');
+      }
+
+      // Register via the new REST API.
+      final data = await _authApi.register(
+        email: email,
+        password: pass,
+        username: username,
+        fullName: fullName,
+        phone: session.metadata['phone'] as String?,
+        clientTimezoneName: timezone.name,
+        clientTimezoneOffsetMinutes: timezone.offsetMinutes,
+      );
+
+      final user = data['user'] as Map<String, dynamic>? ?? {};
+
+      // Clean up session.
+      _sessions.remove(sessionToken);
+
+      return model.AuthUser(
+        id: user['id'] as String? ?? '',
+        username: user['username'] as String? ?? username,
+        email: user['email'] as String?,
+        phone: user['phone'] as String?,
+        fullName: user['full_name'] as String? ?? fullName,
+        dateOfBirth: dateOfBirth,
+        isUnder18: isUnder18,
+        avatarUrl: user['avatar_url'] as String?,
+        bio: null,
+        isActive: true,
+        createdAt: DateTime.now(),
+        updatedAt: DateTime.now(),
+      );
+    } catch (e) {
+      throw Exception('Signup failed: $e');
+    }
+  }
+
+  // ==================== LOGIN METHODS ====================
+
+  Future<AuthLoginOutcome> login({
+    required String identifier,
+    required String password,
+    String? otp,
+  }) async {
+    try {
+      final timezone = await TimezoneService.instance.captureDeviceTimezone();
+      final data = await _authApi.login(
+        email: identifier,
+        password: password,
+        otp: otp,
+        clientTimezoneName: timezone.name,
+        clientTimezoneOffsetMinutes: timezone.offsetMinutes,
+      );
+
+      final role = _extractRole(data);
+      if (_isRestrictedLoginRole(role)) {
+        await _clearRestrictedLoginState();
+        throw const RestrictedLoginException(_restrictedLoginMessage);
+      }
+
+      final requires2fa = data['requires_2fa'] == true;
+      if (requires2fa) {
+        return AuthLoginOutcome(
+          requires2fa: true,
+          email: (data['email'] ?? identifier).toString(),
+          message: data['message']?.toString(),
+        );
+      }
+
+      final user = _normalizeUserMap(data);
+      unawaited(PushService().syncTokenWithBackend());
+      return AuthLoginOutcome(
+        requires2fa: false,
+        user: _userFromApiMap(user),
+      );
+    } on RestrictedLoginException {
+      rethrow;
+    } on ApiException catch (e) {
+      throw Exception('Login failed: ${e.message}');
+    } catch (e) {
+      throw Exception('Login failed: ${e.toString()}');
+    }
+  }
+
+  Future<model.AuthUser> loginWithEmail(String email, String password) async {
+    try {
+      final timezone = await TimezoneService.instance.captureDeviceTimezone();
+      final data = await _authApi.login(
+        email: email,
+        password: password,
+        clientTimezoneName: timezone.name,
+        clientTimezoneOffsetMinutes: timezone.offsetMinutes,
+      );
+
+      final role = _extractRole(data);
+      if (_isRestrictedLoginRole(role)) {
+        await _clearRestrictedLoginState();
+        throw const RestrictedLoginException(_restrictedLoginMessage);
+      }
+
+      if (data['requires_2fa'] == true) {
+        throw Exception('OTP required to complete login.');
+      }
+      final user = _normalizeUserMap(data);
+      return _userFromApiMap(user);
+    } on RestrictedLoginException {
+      rethrow;
+    } on ApiException catch (e) {
+      throw Exception('Login failed: ${e.message}');
+    } catch (e) {
+      throw Exception('Login failed: ${e.toString()}');
+    }
+  }
+
+  Future<model.AuthUser> loginWithUsername(
+    String username,
+    String password,
+  ) async {
+    // The new API login endpoint uses email. If the user enters a username,
+    // we pass it as email and let the server handle the lookup, or
+    // fall back to the email field.
+    try {
+      final timezone = await TimezoneService.instance.captureDeviceTimezone();
+      final data = await _authApi.login(
+        email: username,
+        password: password,
+        clientTimezoneName: timezone.name,
+        clientTimezoneOffsetMinutes: timezone.offsetMinutes,
+      );
+
+      final role = _extractRole(data);
+      if (_isRestrictedLoginRole(role)) {
+        await _clearRestrictedLoginState();
+        throw const RestrictedLoginException(_restrictedLoginMessage);
+      }
+
+      if (data['requires_2fa'] == true) {
+        throw Exception('OTP required to complete login.');
+      }
+      final user = _normalizeUserMap(data);
+      return _userFromApiMap(user);
+    } on RestrictedLoginException {
+      rethrow;
+    } on ApiException catch (e) {
+      throw Exception('Login failed: ${e.message}');
+    } catch (e) {
+      throw Exception('Login failed: ${e.toString()}');
+    }
+  }
+
+  Future<SignupSession> loginWithPhone(String phone) async {
+    throw Exception(
+      'Phone login is not currently supported. Please use Email or Google.',
+    );
+  }
+
+  Future<void> completePhoneLogin(String sessionToken, String otp) async {
+    throw Exception('Phone login is not currently supported.');
+  }
+
+  /// Fetch the current authenticated user profile from the REST API.
+  Future<model.AuthUser?> fetchCurrentUser() async {
+    try {
+      final data = await _authApi.me();
+      return _userFromApiMap(_normalizeUserMap(data));
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Logout – clears stored JWT.
+  Future<void> logout() async {
+    try {
+      try {
+        await PushService().unregisterFromBackend();
+      } catch (_) {}
+      try {
+        await _googleSignIn.signOut();
+      } catch (_) {}
+      try {
+        await _authApi.logout();
+      } catch (_) {}
+    } finally {
+      await SessionResetService.instance.clearUserSessionState();
+    }
+  }
+
+  /// Returns the current Google profile photo URL if the user is signed in
+  /// with Google. Attempts a silent sign-in if needed.
+  Future<String?> getGoogleProfilePhotoUrl({bool trySilent = true}) async {
+    try {
+      var user = _googleSignIn.currentUser;
+      if (user == null && trySilent) {
+        user = await _googleSignIn.signInSilently();
+      }
+      return user?.photoUrl;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Whether we currently have a stored token.
+  Future<bool> get isAuthenticated => _apiClient.hasToken;
+
+  // ── Helpers ────────────────────────────────────────────────────────────────
+
+  model.AuthUser _userFromApiMap(Map<String, dynamic> user) {
+    return model.AuthUser(
+      id: user['id'] as String? ?? user['_id'] as String? ?? '',
+      username: user['username'] as String? ?? 'user',
+      email: user['email'] as String?,
+      phone: user['phone'] as String?,
+      role: _extractRole(user),
+      fullName: user['full_name'] as String?,
+      dateOfBirth: user['date_of_birth'] != null
+          ? DateTime.tryParse(user['date_of_birth'] as String)
+          : null,
+      isUnder18: user['is_under_18'] as bool? ?? false,
+      avatarUrl: user['avatar_url'] as String?,
+      bio: user['bio'] as String?,
+      isActive: true,
+      createdAt: user['createdAt'] != null
+          ? DateTime.parse(user['createdAt'] as String)
+          : DateTime.now(),
+      updatedAt: user['updatedAt'] != null
+          ? DateTime.parse(user['updatedAt'] as String)
+          : DateTime.now(),
+    );
+  }
+
+  Map<String, dynamic> _normalizeUserMap(Map<String, dynamic> raw) {
+    if (raw['user'] is Map) {
+      return Map<String, dynamic>.from(raw['user'] as Map);
+    }
+    if (raw['data'] is Map) {
+      final data = Map<String, dynamic>.from(raw['data'] as Map);
+      if (data['user'] is Map) {
+        return Map<String, dynamic>.from(data['user'] as Map);
+      }
+      return data;
+    }
+    return raw;
+  }
+
+  String? _extractRole(Map<String, dynamic> data) {
+    final raw = data['role'] ??
+        data['user_role'] ??
+        data['userRole'] ??
+        (data['user'] is Map ? (data['user'] as Map)['role'] : null) ??
+        (data['user'] is Map ? (data['user'] as Map)['user_role'] : null) ??
+        (data['user'] is Map ? (data['user'] as Map)['userRole'] : null);
+    final role = raw?.toString().trim().toLowerCase();
+    return role == null || role.isEmpty ? null : role;
+  }
+
+  bool _isRestrictedLoginRole(String? role) {
+    return role != null && _restrictedLoginRoles.contains(role);
+  }
+
+  Future<void> _clearRestrictedLoginState() async {
+    try {
+      await _apiClient.clearToken();
+    } catch (_) {}
+    try {
+      await _googleSignIn.signOut();
+    } catch (_) {}
+  }
+
+  /// Internal password used for Google-based accounts so we can integrate
+  /// with the REST API's email+password contract without exposing a
+  /// separate password to the user.
+  String _googlePasswordForEmail(String email) {
+    return 'google-oauth-$email';
+  }
+
+  String _generateSessionToken() {
+    return DateTime.now().millisecondsSinceEpoch.toString() +
+        (1000 + Random().nextInt(9000)).toString();
+  }
+}

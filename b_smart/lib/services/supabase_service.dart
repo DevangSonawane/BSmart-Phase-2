@@ -1,0 +1,1475 @@
+import 'dart:typed_data';
+import '../api/api.dart';
+import 'dart:convert';
+import 'package:shared_preferences/shared_preferences.dart';
+import '../utils/current_user.dart';
+import '../utils/value_parsers.dart';
+import 'comment_sync_service.dart';
+import 'content_sync_service.dart';
+
+/// Service layer that was previously calling Supabase directly.
+///
+/// Now delegates to the new REST API endpoints while keeping the same
+/// public interface so existing screens/widgets continue to work unchanged.
+class SupabaseService {
+  static final SupabaseService _instance = SupabaseService._internal();
+  factory SupabaseService() => _instance;
+  SupabaseService._internal();
+
+  final UsersApi _usersApi = UsersApi();
+  final VendorsApi _vendorsApi = VendorsApi();
+  final PostsApi _postsApi = PostsApi();
+  final CommentsApi _commentsApi = CommentsApi();
+  final TweetsApi _tweetsApi = TweetsApi();
+  final PromoteReelsApi _promoteReelsApi = PromoteReelsApi();
+  final TweetCommentsApi _tweetCommentsApi = TweetCommentsApi();
+  final UploadApi _uploadApi = UploadApi();
+  final FollowsApi _followsApi = FollowsApi();
+  void clearSessionCache() {
+    _repliesCache.clear();
+  }
+
+  void setCommentLikeOverride(String commentId, bool liked) {
+    // No-op: comment likes are now treated as live state, not cached state.
+  }
+
+  void syncCommentLikeState({
+    required String postId,
+    required String commentId,
+    required bool liked,
+    required bool isTweet,
+  }) {
+    CommentSyncService().notifyChanged(
+      postId: postId,
+      isTweet: isTweet,
+      commentId: commentId.trim(),
+      liked: liked,
+    );
+  }
+
+  bool? getCommentLikeOverride(String commentId) {
+    return null;
+  }
+
+  final Map<String, List<Map<String, dynamic>>> _repliesCache = {};
+  void setRepliesCache(String commentId, List<Map<String, dynamic>> replies) {
+    _repliesCache[commentId] = List<Map<String, dynamic>>.from(replies);
+    () async {
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setString('replies_cache_$commentId', jsonEncode(replies));
+      } catch (_) {}
+    }();
+  }
+
+  List<Map<String, dynamic>> getRepliesCached(String commentId) {
+    return List<Map<String, dynamic>>.from(
+        _repliesCache[commentId] ?? const []);
+  }
+
+  Future<Map<String, List<Map<String, dynamic>>>> loadRepliesCacheFor(
+      List<String> commentIds) async {
+    final result = <String, List<Map<String, dynamic>>>{};
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      for (final id in commentIds) {
+        final raw = prefs.getString('replies_cache_$id');
+        if (raw != null && raw.isNotEmpty) {
+          final parsed = jsonDecode(raw);
+          if (parsed is List) {
+            final list = parsed
+                .map((e) => (e as Map).cast<String, dynamic>())
+                .toList()
+                .cast<Map<String, dynamic>>();
+            _repliesCache[id] = list;
+            result[id] = list;
+          }
+        }
+      }
+    } catch (_) {}
+    return result;
+  }
+
+  static const String _savedPostsKeyPrefix = 'saved_posts_';
+  static const String _followedUsersKeyPrefix = 'followed_users_';
+
+  Future<Set<String>> getSavedPostIds(String userId) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString('$_savedPostsKeyPrefix$userId');
+      if (raw == null || raw.isEmpty) return <String>{};
+      final decoded = jsonDecode(raw);
+      if (decoded is List) {
+        return decoded.map((e) => e.toString()).toSet();
+      }
+      return <String>{};
+    } catch (_) {
+      return <String>{};
+    }
+  }
+
+  Future<void> _setSavedPostIds(String userId, Set<String> ids) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(
+        '$_savedPostsKeyPrefix$userId',
+        jsonEncode(ids.toList()),
+      );
+    } catch (_) {}
+  }
+
+  Future<void> _updateLocalSaved(String postId, bool saved) async {
+    try {
+      final uid = await CurrentUser.id;
+      if (uid == null || uid.isEmpty) return;
+      final current = await getSavedPostIds(uid);
+      if (saved) {
+        current.add(postId);
+      } else {
+        current.remove(postId);
+      }
+      await _setSavedPostIds(uid, current);
+    } catch (_) {}
+  }
+
+  Future<Set<String>> getFollowedUserIds(String userId) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString('$_followedUsersKeyPrefix$userId');
+      if (raw == null || raw.isEmpty) return <String>{};
+      final decoded = jsonDecode(raw);
+      if (decoded is List) {
+        return decoded.map((e) => e.toString()).toSet();
+      }
+      return <String>{};
+    } catch (_) {
+      return <String>{};
+    }
+  }
+
+  Future<void> _setFollowedUserIds(String userId, Set<String> ids) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(
+        '$_followedUsersKeyPrefix$userId',
+        jsonEncode(ids.toList()),
+      );
+    } catch (_) {}
+  }
+
+  Future<void> syncFollowStatus(String targetUserId, bool followed) async {
+    await _updateLocalFollow(targetUserId, followed);
+    ContentSyncService().publishFollow(
+      userId: targetUserId,
+      followed: followed,
+      followState: followed ? 'following' : 'not_following',
+    );
+  }
+
+  Future<void> _updateLocalFollow(String targetUserId, bool followed) async {
+    try {
+      final uid = await CurrentUser.id;
+      if (uid == null || uid.isEmpty) return;
+      final current = await getFollowedUserIds(uid);
+      if (followed) {
+        current.add(targetUserId);
+      } else {
+        current.remove(targetUserId);
+      }
+      await _setFollowedUserIds(uid, current);
+    } catch (_) {}
+  }
+
+  // ── Users ──────────────────────────────────────────────────────────────────
+
+  Future<Map<String, dynamic>?> getUserById(String userId) async {
+    // Primary source: public users endpoint with posts
+    try {
+      final data = await _usersApi.getUserProfile(userId);
+
+      // Case 1: data['user'] exists (Standard format)
+      if (data['user'] is Map) {
+        return data['user'] as Map<String, dynamic>;
+      }
+
+      // Case 2: data['data'] exists (Sometimes wrapped)
+      if (data['data'] is Map) {
+        final d = data['data'] as Map;
+        if (d['user'] is Map) return d['user'] as Map<String, dynamic>;
+        // If data['data'] IS the user object
+        if (d['username'] != null ||
+            d['full_name'] != null ||
+            d['_id'] != null) {
+          return d.cast<String, dynamic>();
+        }
+      }
+
+      // Case 3: data IS the user object (Direct return)
+      if (data['username'] != null ||
+          data['full_name'] != null ||
+          data['_id'] != null ||
+          data['id'] != null) {
+        return data;
+      }
+    } catch (_) {}
+
+    // Fallback: authenticated user endpoint
+    try {
+      final me = await AuthApi().me();
+      // Only return if it matches the requested id or no public profile existed
+      final meId = (me['id'] as String?) ??
+          (me['_id'] as String?) ??
+          (me['user_id'] as String?) ??
+          (me['userId'] as String?);
+      if (meId != null && meId == userId) {
+        return me;
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  Future<Map<String, dynamic>?> getVendorById(String vendorUserId) async {
+    try {
+      final data = await _vendorsApi.getVendorById(vendorUserId);
+      if (data['vendor'] is Map) {
+        return (data['vendor'] as Map).cast<String, dynamic>();
+      }
+      if (data['data'] is Map) {
+        final d = (data['data'] as Map).cast<String, dynamic>();
+        if (d['vendor'] is Map) {
+          return (d['vendor'] as Map).cast<String, dynamic>();
+        }
+        return d;
+      }
+      return data;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<Map<String, dynamic>?> getUserByEmail(String email) async {
+    try {
+      return await _usersApi.getUserByEmail(email);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<bool> checkUsernameAvailable(String username) async {
+    // No dedicated endpoint – the server rejects duplicate usernames at
+    // registration time. Return true optimistically.
+    return true;
+  }
+
+  Future<bool> updateUserProfile(
+      String userId, Map<String, dynamic> updates) async {
+    try {
+      await _usersApi.updateUser(
+        userId,
+        fullName: updates['full_name'] as String?,
+        bio: updates['bio'] as String?,
+        avatarUrl: updates['avatar_url'] as String?,
+        phone: updates['phone'] as String?,
+        username: updates['username'] as String?,
+      );
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  // ── Posts ───────────────────────────────────────────────────────────────────
+
+  Future<Map<String, dynamic>?> getPostById(String postId,
+      {bool? isTweet}) async {
+    // React parity: try posts first, then fall back to tweets if needed.
+    if (isTweet == true) {
+      try {
+        return await _tweetsApi.getTweet(postId);
+      } catch (_) {}
+    }
+    try {
+      return await _postsApi.getPost(postId);
+    } catch (_) {}
+    try {
+      return await _tweetsApi.getTweet(postId);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<List<Map<String, dynamic>>> getUserPosts(String userId,
+      {int limit = 20, int offset = 0}) async {
+    List<Map<String, dynamic>> slice(List<Map<String, dynamic>> posts) {
+      if (posts.isEmpty) return posts;
+      final safeOffset = offset < 0 ? 0 : offset;
+      if (safeOffset >= posts.length) return <Map<String, dynamic>>[];
+      final safeLimit = limit <= 0 ? posts.length : limit;
+      final end = (safeOffset + safeLimit);
+      return posts.sublist(
+        safeOffset,
+        end > posts.length ? posts.length : end,
+      );
+    }
+
+    try {
+      final posts = await _usersApi.getUserPosts(userId);
+      return slice(posts);
+    } catch (_) {}
+    try {
+      final data = await _usersApi.getUserProfile(userId);
+      List<dynamic> posts = [];
+      if (data['posts'] is List) {
+        posts = data['posts'] as List<dynamic>;
+      } else if (data['user'] is Map &&
+          (data['user'] as Map)['posts'] is List) {
+        posts = ((data['user'] as Map)['posts'] as List<dynamic>);
+      } else if (data['data'] is Map &&
+          (data['data'] as Map)['posts'] is List) {
+        posts = ((data['data'] as Map)['posts'] as List<dynamic>);
+      }
+      if (posts.isNotEmpty) {
+        return slice(posts.cast<Map<String, dynamic>>());
+      }
+    } catch (_) {}
+    try {
+      final page = (offset ~/ limit) + 1;
+      final data = await _postsApi.getFeed(page: page, limit: limit * 3);
+      List<dynamic> raw = [];
+      if (data is List) {
+        raw = data;
+      } else if (data is Map) {
+        raw = data['posts'] as List<dynamic>? ?? [];
+      }
+      final posts = raw.where((p) {
+        final m = (p as Map).cast<String, dynamic>();
+        final uid = m['user_id'];
+        if (uid is String) {
+          if (uid == userId) return true;
+        } else if (uid is Map) {
+          final id = uid['_id'] as String? ?? uid['id'] as String?;
+          if (id == userId) return true;
+        }
+        final joinedUser = m['users'];
+        if (joinedUser is Map) {
+          final id =
+              joinedUser['id'] as String? ?? joinedUser['_id'] as String?;
+          if (id == userId) return true;
+        }
+        return false;
+      }).toList();
+      return slice(posts.cast<Map<String, dynamic>>());
+    } catch (_) {
+      return [];
+    }
+  }
+
+  Future<List<Map<String, dynamic>>> getUserSavedPosts(String userId,
+      {int limit = 20, int offset = 0}) async {
+    final localSaved = await getSavedPostIds(userId);
+    try {
+      final page = (offset ~/ limit) + 1;
+      final data = await _postsApi.getFeed(page: page, limit: limit * 3);
+      List<dynamic> raw = [];
+      if (data is List) {
+        raw = data;
+      } else if (data is Map) {
+        raw = data['posts'] as List<dynamic>? ?? [];
+      }
+      final posts = raw.where((p) {
+        final m = (p as Map).cast<String, dynamic>();
+        final id = (m['id'] ?? m['_id'])?.toString();
+        if (id != null && localSaved.contains(id)) return true;
+        final isSaved = m['is_saved_by_me'] as bool?;
+        if (isSaved == true) return true;
+        final savedBy = m['saved_by'] as List<dynamic>?;
+        if (savedBy != null) {
+          for (final entry in savedBy) {
+            if (entry is String && entry == userId) return true;
+            if (entry is Map) {
+              final id = entry['id'] as String? ??
+                  entry['_id'] as String? ??
+                  entry['user_id'] as String?;
+              if (id == userId) return true;
+            }
+          }
+        }
+        final bookmarks = m['bookmarks'] as List<dynamic>?;
+        if (bookmarks != null) {
+          for (final b in bookmarks) {
+            if (b is String && b == userId) return true;
+            if (b is Map) {
+              final id = b['id'] as String? ??
+                  b['_id'] as String? ??
+                  b['user_id'] as String?;
+              if (id == userId) return true;
+            }
+          }
+        }
+        return false;
+      }).toList();
+      return posts.cast<Map<String, dynamic>>();
+    } catch (_) {
+      return [];
+    }
+  }
+
+  Future<List<Map<String, dynamic>>> getUserTaggedPosts(String userId,
+      {int limit = 20, int offset = 0}) async {
+    try {
+      final page = (offset ~/ limit) + 1;
+      final data = await _postsApi.getFeed(page: page, limit: limit * 3);
+      List<dynamic> raw = [];
+      if (data is List) {
+        raw = data;
+      } else if (data is Map) {
+        raw = data['posts'] as List<dynamic>? ?? [];
+      }
+      final posts = raw.where((p) {
+        final m = (p as Map).cast<String, dynamic>();
+        final peopleTags = (m['people_tags'] as List<dynamic>?) ??
+            (m['peopleTags'] as List<dynamic>?) ??
+            const [];
+        for (final t in peopleTags) {
+          if (t is String && t == userId) return true;
+          if (t is Map) {
+            final id = t['user_id'] as String? ??
+                t['id'] as String? ??
+                t['_id'] as String?;
+            if (id == userId) return true;
+          }
+        }
+        return false;
+      }).toList();
+      return posts.cast<Map<String, dynamic>>();
+    } catch (_) {
+      return [];
+    }
+  }
+
+  Future<List<Map<String, dynamic>>> fetchFeed(
+      {int limit = 20, int offset = 0}) async {
+    try {
+      final page = (offset ~/ limit) + 1;
+      final data = await _postsApi.getFeed(page: page, limit: limit);
+      if (data is List) {
+        return data.cast<Map<String, dynamic>>();
+      }
+      final posts = (data as Map)['posts'] as List<dynamic>? ?? [];
+      return posts.cast<Map<String, dynamic>>();
+    } catch (_) {
+      return [];
+    }
+  }
+
+  Future<bool> createPost(Map<String, dynamic> postData) async {
+    try {
+      final media = postData['media'] as List<dynamic>? ?? [];
+      await _postsApi.createPost(
+        media: media.cast<Map<String, dynamic>>(),
+        caption: postData['caption'] as String?,
+        location: postData['location'],
+        tags: (postData['tags'] as List<dynamic>?)
+            ?.map((e) => e.toString())
+            .toList(),
+        hideLikesCount: postData['hide_likes_count'] as bool?,
+        turnOffCommenting: postData['turn_off_commenting'] as bool?,
+        hideShareCount: postData['hide_share_count'] as bool?,
+        peopleTags: (postData['people_tags'] as List<dynamic>?)
+            ?.map((e) => (e as Map).cast<String, dynamic>())
+            .toList(),
+        type: postData['type'] as String? ?? 'post',
+      );
+      return true;
+    } on ApiException {
+      // Fallback: retry with a minimal media payload if server rejects full schema
+      try {
+        final media = (postData['media'] as List<dynamic>? ?? [])
+            .map((e) => (e as Map).cast<String, dynamic>())
+            .map((m) => {
+                  'fileUrl': m['fileUrl'],
+                  'type': m['type'],
+                })
+            .toList();
+        await _postsApi.createPost(
+          media: media,
+          caption: postData['caption'] as String?,
+          location: postData['location'],
+          hideShareCount: postData['hide_share_count'] as bool?,
+          type: postData['type'] as String? ?? 'post',
+        );
+        return true;
+      } catch (_) {
+        return false;
+      }
+    }
+  }
+
+  // ── Follows ────────────────────────────────────────────────────────────────
+
+  Future<bool> toggleFollow(String userId, String targetUserId) async {
+    try {
+      if (userId == targetUserId) {
+        return true;
+      }
+      final res = await _followsApi.follow(targetUserId);
+      final followed = res['followed'] as bool? ?? true;
+      return followed;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<bool> followUser(String targetUserId) async {
+    bool result = false; // Default to failure for optimistic UI revert
+    String followState = 'not_following';
+    bool followed = false;
+
+    void absorbResponse(Map<String, dynamic>? res) {
+      if (res == null) return;
+      final rawStatus = (res['status'] ??
+              res['requestStatus'] ??
+              res['request_status'] ??
+              res['followRequestStatus'] ??
+              res['follow_request_status'])
+          ?.toString()
+          .trim()
+          .toLowerCase();
+      final isPending = rawStatus == 'pending' ||
+          rawStatus == 'requested' ||
+          rawStatus == 'request_pending' ||
+          rawStatus == 'follow_requested';
+      final explicitFollowed = res['followed'] as bool?;
+      final explicitRequested = res['is_requested'] as bool? ??
+          res['requested'] as bool? ??
+          res['requestPending'] as bool? ??
+          res['isPending'] as bool?;
+      if (isPending || explicitRequested == true) {
+        followState = 'requested';
+        followed = false;
+        return;
+      }
+      if (explicitFollowed != null) {
+        followed = explicitFollowed;
+        followState = explicitFollowed ? 'following' : 'not_following';
+      } else if (res['isFollowing'] == true ||
+          res['is_following'] == true ||
+          res['followed_by_me'] == true ||
+          res['is_followed_by_me'] == true) {
+        followed = true;
+        followState = 'following';
+      }
+    }
+
+    try {
+      final res = await _followsApi.follow(targetUserId);
+      absorbResponse(res);
+      result = true;
+    } catch (_) {
+      try {
+        final res = await _followsApi.followById(targetUserId);
+        absorbResponse(res);
+        result = true;
+      } catch (_) {
+        result = false;
+      }
+    }
+    // Only update local cache if operation appeared successful (or explicitly returned status)
+    if (result) {
+      await _updateLocalFollow(targetUserId, followed);
+      ContentSyncService().publishFollow(
+        userId: targetUserId,
+        followed: followed,
+        followState: followState,
+      );
+    }
+    return result;
+  }
+
+  Future<bool> unfollowUser(String targetUserId) async {
+    bool result = false; // Default to failure
+    try {
+      final res = await _followsApi.unfollow(targetUserId);
+      final followed = res['followed'] as bool?;
+      if (followed != null) {
+        result =
+            !followed; // If followed=false, then unfollow succeeded (result=true means "success")
+      } else {
+        result = true;
+      }
+    } catch (_) {
+      result = false;
+    }
+    // If unfollow succeeded (result=true), we update cache to false (not following)
+    if (result) {
+      await _updateLocalFollow(targetUserId, false);
+      ContentSyncService().publishFollow(
+        userId: targetUserId,
+        followed: false,
+        followState: 'not_following',
+      );
+    }
+    return result;
+  }
+
+  Future<List<Map<String, dynamic>>> getFollowers(String userId) {
+    return _followsApi.getFollowers(userId);
+  }
+
+  Future<List<Map<String, dynamic>>> getFollowing(String userId) {
+    return _followsApi.getFollowing(userId);
+  }
+
+  Future<List<Map<String, dynamic>>> getAllFollowers() {
+    return _followsApi.getAllFollowers();
+  }
+
+  Future<List<Map<String, dynamic>>> getAllFollowing() {
+    return _followsApi.getAllFollowing();
+  }
+
+  Future<int> getFollowersCount(String userId) async {
+    try {
+      final list = await _followsApi.getFollowers(userId);
+      return list.length;
+    } catch (_) {
+      return 0;
+    }
+  }
+
+  Future<int> getFollowingCount(String userId) async {
+    try {
+      final list = await _followsApi.getFollowing(userId);
+      return list.length;
+    } catch (_) {
+      return 0;
+    }
+  }
+
+  Future<bool> isFollowing(String meId, String targetUserId) async {
+    try {
+      final ids = await getFollowedUserIds(meId);
+      if (ids.contains(targetUserId)) {
+        return true;
+      }
+    } catch (_) {}
+    return false;
+  }
+
+  // ── Uploads ────────────────────────────────────────────────────────────────
+
+  Future<Map<String, dynamic>> uploadFile(
+      String bucket, String path, Uint8List bytes,
+      {bool makePublic = true}) async {
+    final result = await _uploadApi.uploadFileBytes(
+      bytes: bytes,
+      filename: path.split('/').last,
+    );
+    return result;
+  }
+
+  Future<Map<String, dynamic>> uploadAvatarBytes({
+    required Uint8List bytes,
+    String filename = 'avatar.jpg',
+  }) async {
+    final result = await _uploadApi.uploadAvatarBytes(
+      bytes: bytes,
+      filename: filename,
+    );
+    return result;
+  }
+
+  // ── Comments ───────────────────────────────────────────────────────────────
+
+  List<dynamic> _extractCommentsList(dynamic data) {
+    if (data is List) return data;
+    if (data is! Map) return const [];
+
+    final map = data;
+    final candidates = <dynamic>[
+      map['comments'],
+      map['data'],
+      map['results'],
+      map['items'],
+      map['rows'],
+      map['docs'],
+      map['payload'],
+      map['list'],
+      map['commentList'],
+    ];
+
+    for (final c in candidates) {
+      if (c is List) return c;
+      if (c is Map) {
+        final nested = c['comments'] ??
+            c['data'] ??
+            c['results'] ??
+            c['items'] ??
+            c['rows'] ??
+            c['docs'] ??
+            c['list'];
+        if (nested is List) return nested;
+      }
+    }
+    return const [];
+  }
+
+  Map<String, dynamic> _normalizeComment(Map<String, dynamic> raw) {
+    final out = Map<String, dynamic>.from(raw);
+
+    int toInt(dynamic v) {
+      if (v is int) return v;
+      if (v is num) return v.toInt();
+      if (v is String) return int.tryParse(v) ?? 0;
+      return 0;
+    }
+
+    bool toBool(dynamic v) {
+      if (v is bool) return v;
+      if (v is num) return v != 0;
+      final s = v?.toString().trim().toLowerCase();
+      if (s == 'true' || s == '1') return true;
+      if (s == 'false' || s == '0') return false;
+      return false;
+    }
+
+    final id = (out['_id'] ?? out['id'])?.toString();
+    if (id != null && id.isNotEmpty) {
+      out['_id'] = id;
+      out['id'] = id;
+    }
+
+    final content =
+        (out['content'] ?? out['text'] ?? out['comment'])?.toString();
+    if (content != null) {
+      out['content'] = content;
+      out['text'] = content;
+    }
+
+    final createdAt =
+        (out['created_at'] ?? out['createdAt'] ?? out['timestamp'])?.toString();
+    if (createdAt != null) {
+      out['created_at'] = createdAt;
+      out['createdAt'] = createdAt;
+    }
+
+    final likesCount = out['likes_count'] ??
+        out['likesCount'] ??
+        (out['likes'] is List ? (out['likes'] as List).length : null) ??
+        0;
+    final likesCountInt = tryParseInt(likesCount) ?? 0;
+    out['likes_count'] = likesCountInt;
+    out['likesCount'] = likesCountInt;
+
+    // Normalize common "liked by me" flags so UIs can reliably read them.
+    if (out.containsKey('is_liked_by_me') ||
+        out.containsKey('liked_by_me') ||
+        out.containsKey('isLikedByMe') ||
+        out.containsKey('liked')) {
+      final likedByMe = toBool(out['is_liked_by_me']) ||
+          toBool(out['liked_by_me']) ||
+          toBool(out['isLikedByMe']) ||
+          toBool(out['liked']);
+      out['is_liked_by_me'] = likedByMe;
+      out['liked_by_me'] = likedByMe;
+      out['liked'] = likedByMe;
+    }
+
+    final repliesCount = toInt(out['reply_count']) > 0
+        ? toInt(out['reply_count'])
+        : toInt(out['replies_count']) > 0
+            ? toInt(out['replies_count'])
+            : toInt(out['replyCount']) > 0
+                ? toInt(out['replyCount'])
+                : toInt(out['repliesCount']) > 0
+                    ? toInt(out['repliesCount'])
+                    : (out['replies'] is List
+                        ? (out['replies'] as List).length
+                        : 0);
+    out['reply_count'] = repliesCount;
+    out['replies_count'] = repliesCount;
+
+    dynamic pickUserRaw() {
+      // Prefer embedded user objects over plain ids. Some endpoints include
+      // both `user: "<id>"` and `user_id: { ...user... }`; the old logic would
+      // pick the string and lose the rich object, causing usernames to show as
+      // the fallback "user".
+      final candidates = <dynamic>[
+        out['user'],
+        out['users'],
+        out['author'],
+        out['user_id'],
+        out['userId'],
+        out['userID'],
+        out['created_by'],
+        out['createdBy'],
+        out['sender'],
+      ];
+      for (final c in candidates) {
+        if (c is Map) return c;
+      }
+      for (final c in candidates) {
+        if (c != null) return c;
+      }
+      return null;
+    }
+
+    final userRaw = pickUserRaw();
+    Map<String, dynamic> user = {};
+    if (userRaw is Map) {
+      user = Map<String, dynamic>.from(userRaw);
+      final userId = (user['id'] ??
+              user['_id'] ??
+              (out['user_id'] is String || out['user_id'] is num
+                  ? out['user_id']
+                  : null) ??
+              out['userId'] ??
+              out['userID'])
+          ?.toString();
+      if (userId != null && userId.isNotEmpty) {
+        user['id'] = userId;
+        user['_id'] = userId;
+        out['user_id'] = userId;
+      }
+      user['username'] = (user['username'] ??
+              user['handle'] ??
+              user['name'] ??
+              user['full_name'] ??
+              out['username'] ??
+              out['user_name'] ??
+              'User')
+          .toString();
+      user['avatar_url'] = (user['avatar_url'] ??
+              user['avatar'] ??
+              user['profile_picture'] ??
+              user['profilePicture'] ??
+              out['avatar_url'])
+          ?.toString();
+    } else if (userRaw != null) {
+      final userId = userRaw.toString();
+      if (userId.isNotEmpty) {
+        out['user_id'] = userId;
+        user = {
+          'id': userId,
+          '_id': userId,
+          'username':
+              (out['username'] ?? out['user_name'] ?? 'User').toString(),
+          'avatar_url': out['avatar_url']?.toString(),
+        };
+      }
+    }
+    if (user.isNotEmpty) {
+      out['user'] = user;
+      out['users'] = user;
+    }
+
+    return out;
+  }
+
+  Future<List<Map<String, dynamic>>> getComments(String postId,
+      {int page = 1,
+      int limit = 50,
+      bool newestFirst = true,
+      bool? isTweet}) async {
+    try {
+      final data = (isTweet == true)
+          ? await _tweetCommentsApi.getComments(postId,
+              page: page, limit: limit)
+          : await _commentsApi.getComments(postId, page: page, limit: limit);
+      final list = _extractCommentsList(data);
+      final comments = list
+          .whereType<Map>()
+          .map((e) => _normalizeComment(Map<String, dynamic>.from(e)))
+          .toList();
+      if (newestFirst) {
+        comments.sort((a, b) {
+          final as =
+              (a['created_at'] as String?) ?? (a['createdAt'] as String?) ?? '';
+          final bs =
+              (b['created_at'] as String?) ?? (b['createdAt'] as String?) ?? '';
+          final ad =
+              DateTime.tryParse(as) ?? DateTime.fromMillisecondsSinceEpoch(0);
+          final bd =
+              DateTime.tryParse(bs) ?? DateTime.fromMillisecondsSinceEpoch(0);
+          return bd.compareTo(ad);
+        });
+      }
+      return comments;
+    } catch (_) {
+      if (isTweet == true) return [];
+      // Fallback: if caller didn't know content type, try tweet comments.
+      try {
+        final data = await _tweetCommentsApi.getComments(postId,
+            page: page, limit: limit);
+        final list = _extractCommentsList(data);
+        final comments = list
+            .whereType<Map>()
+            .map((e) => _normalizeComment(Map<String, dynamic>.from(e)))
+            .toList();
+        if (newestFirst) {
+          comments.sort((a, b) {
+            final as = (a['created_at'] as String?) ??
+                (a['createdAt'] as String?) ??
+                '';
+            final bs = (b['created_at'] as String?) ??
+                (b['createdAt'] as String?) ??
+                '';
+            final ad =
+                DateTime.tryParse(as) ?? DateTime.fromMillisecondsSinceEpoch(0);
+            final bd =
+                DateTime.tryParse(bs) ?? DateTime.fromMillisecondsSinceEpoch(0);
+            return bd.compareTo(ad);
+          });
+        }
+        return comments;
+      } catch (_) {
+        return [];
+      }
+    }
+  }
+
+  Future<Map<String, dynamic>?> addComment(
+      String postId, String userId, String content,
+      {String? parentId, bool? isTweet}) async {
+    try {
+      final created = (isTweet == true)
+          ? await _tweetCommentsApi.addComment(
+              postId,
+              text: content,
+              parentId: parentId,
+            )
+          : await _commentsApi.addComment(
+              postId,
+              text: content,
+              parentId: parentId,
+            );
+      CommentSyncService().notifyChanged(
+        postId: postId,
+        isTweet: isTweet == true,
+        delta: (parentId == null || parentId.isEmpty) ? 1 : 0,
+      );
+      if (parentId == null || parentId.isEmpty) {
+        ContentSyncService().publishCommentCount(
+          contentId: postId,
+          commentsDelta: 1,
+          isTweet: isTweet == true,
+        );
+      }
+      return created;
+    } catch (_) {
+      if (isTweet == true) return null;
+      try {
+        final created = await _tweetCommentsApi.addComment(
+          postId,
+          text: content,
+          parentId: parentId,
+        );
+        CommentSyncService().notifyChanged(
+          postId: postId,
+          isTweet: true,
+          delta: (parentId == null || parentId.isEmpty) ? 1 : 0,
+        );
+        if (parentId == null || parentId.isEmpty) {
+          ContentSyncService().publishCommentCount(
+            contentId: postId,
+            commentsDelta: 1,
+            isTweet: true,
+          );
+        }
+        return created;
+      } catch (_) {}
+      return null;
+    }
+  }
+
+  Future<bool> deleteComment(String commentId, {bool? isTweet}) async {
+    try {
+      if (isTweet == true) {
+        await _tweetCommentsApi.deleteComment(commentId);
+      } else {
+        await _commentsApi.deleteComment(commentId);
+      }
+      return true;
+    } catch (_) {
+      if (isTweet == true) return false;
+      try {
+        await _tweetCommentsApi.deleteComment(commentId);
+        return true;
+      } catch (_) {}
+      return false;
+    }
+  }
+
+  Future<Map<String, dynamic>?> likeComment(
+    String commentId, {
+    bool? isTweet,
+    bool throwOnError = false,
+  }) async {
+    try {
+      final res = (isTweet == true)
+          ? await _tweetCommentsApi.likeComment(commentId)
+          : await _commentsApi.likeComment(commentId);
+      return res;
+    } catch (e) {
+      if (throwOnError) rethrow;
+      if (isTweet == true) return null;
+      try {
+        return await _tweetCommentsApi.likeComment(commentId);
+      } catch (_) {}
+      return null;
+    }
+  }
+
+  Future<Map<String, dynamic>?> unlikeComment(
+    String commentId, {
+    bool? isTweet,
+    bool throwOnError = false,
+  }) async {
+    try {
+      final res = (isTweet == true)
+          ? await _tweetCommentsApi.unlikeComment(commentId)
+          : await _commentsApi.unlikeComment(commentId);
+      return res;
+    } catch (e) {
+      if (throwOnError) rethrow;
+      if (isTweet == true) return null;
+      try {
+        return await _tweetCommentsApi.unlikeComment(commentId);
+      } catch (_) {}
+      return null;
+    }
+  }
+
+  Future<List<Map<String, dynamic>>> getReplies(String commentId,
+      {int page = 1, int limit = 10, bool? isTweet}) async {
+    try {
+      final res = (isTweet == true)
+          ? await _tweetCommentsApi.getReplies(commentId,
+              page: page, limit: limit)
+          : await _commentsApi.getReplies(commentId, page: page, limit: limit);
+      List<dynamic> replies = const [];
+      if (res is List) {
+        replies = res;
+      } else if (res is Map) {
+        replies = (res['replies'] as List<dynamic>?) ??
+            (res['data'] as List<dynamic>?) ??
+            (res['results'] as List<dynamic>?) ??
+            (res['items'] as List<dynamic>?) ??
+            ((res['data'] is Map && (res['data'] as Map)['replies'] is List)
+                ? ((res['data'] as Map)['replies'] as List<dynamic>)
+                : const []);
+      }
+      final casted = replies
+          .whereType<Map>()
+          .map((e) => _normalizeComment(Map<String, dynamic>.from(e)))
+          .toList();
+      setRepliesCache(commentId, casted);
+      return casted;
+    } catch (_) {
+      if (isTweet != true) {
+        try {
+          final res = await _tweetCommentsApi.getReplies(
+            commentId,
+            page: page,
+            limit: limit,
+          );
+          List<dynamic> replies = const [];
+          if (res is List) {
+            replies = res;
+          } else if (res is Map) {
+            replies = (res['replies'] as List<dynamic>?) ??
+                (res['data'] as List<dynamic>?) ??
+                (res['results'] as List<dynamic>?) ??
+                (res['items'] as List<dynamic>?) ??
+                ((res['data'] is Map && (res['data'] as Map)['replies'] is List)
+                    ? ((res['data'] as Map)['replies'] as List<dynamic>)
+                    : const []);
+          }
+          final casted = replies
+              .whereType<Map>()
+              .map((e) => _normalizeComment(Map<String, dynamic>.from(e)))
+              .toList();
+          setRepliesCache(commentId, casted);
+          return casted;
+        } catch (_) {}
+      }
+      return getRepliesCached(commentId);
+    }
+  }
+
+  // ── Likes ──────────────────────────────────────────────────────────────────
+
+  Future<Set<String>> getLikedPostIds(String userId) async {
+    // The new API doesn't have a batch "get liked post IDs" endpoint.
+    // Feed posts include `is_liked_by_me` so we derive it at render time.
+    return {};
+  }
+
+  Future<bool> updatePostLikes(
+      String postId, List<Map<String, dynamic>> likes) async {
+    // Replaced by explicit like/unlike endpoints.
+    return false;
+  }
+
+  Future<bool> togglePostLike(String postId, String userId) async {
+    try {
+      // Try to like; if already liked the server returns 400, then unlike.
+      try {
+        await _postsApi.likePost(postId);
+        return true; // liked
+      } on BadRequestException {
+        await _postsApi.unlikePost(postId);
+        return false; // unliked
+      }
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Explicitly set post like state.
+  ///
+  /// Calls `/posts/:id/like` when [like] is true, otherwise `/posts/:id/unlike`.
+  /// Returns the server's authoritative `liked` state.
+  Future<bool> setPostLike(String postId,
+      {required bool like, bool? isTweet}) async {
+    bool? parseLiked(Map<String, dynamic>? payload) {
+      if (payload == null) return null;
+      final candidates = [
+        payload['liked'],
+        payload['is_liked'],
+        payload['isLiked'],
+        payload['is_liked_by_me'],
+        payload['liked_by_me'],
+      ];
+      for (final value in candidates) {
+        if (value is bool) return value;
+        if (value is num) return value != 0;
+        if (value is String) {
+          final lower = value.trim().toLowerCase();
+          if (lower == 'true' || lower == '1') return true;
+          if (lower == 'false' || lower == '0') return false;
+        }
+      }
+      return null;
+    }
+
+    String normalizePromoteId(String id) {
+      var out = id.trim();
+      const slotToken = '-slot-promote-';
+      final slotIdx = out.indexOf(slotToken);
+      if (slotIdx != -1) out = out.substring(0, slotIdx);
+      if (out.startsWith('promote-')) out = out.substring('promote-'.length);
+      return out.trim();
+    }
+
+    final promoteId = normalizePromoteId(postId);
+    final isPromote = promoteId.isNotEmpty &&
+        (postId.startsWith('promote-') || postId.contains('-slot-promote-'));
+
+    try {
+      if (isPromote) {
+        final res = like
+            ? await _promoteReelsApi.likePromoteReel(promoteId)
+            : await _promoteReelsApi.unlikePromoteReel(promoteId);
+        final liked = parseLiked(res);
+        if (liked != null) {
+          ContentSyncService().publishLike(
+            contentId: postId,
+            liked: liked,
+            isTweet: isTweet,
+          );
+          return liked;
+        }
+        ContentSyncService().publishLike(
+          contentId: postId,
+          liked: like,
+          isTweet: isTweet,
+        );
+        return like;
+      }
+
+      final Map<String, dynamic> res = (isTweet == true)
+          ? (like
+              ? await _tweetsApi.likeTweet(postId)
+              : await _tweetsApi.unlikeTweet(postId))
+          : (like
+              ? await _postsApi.likePost(postId)
+              : await _postsApi.unlikePost(postId));
+      final liked = parseLiked(res);
+      if (liked != null) {
+        ContentSyncService().publishLike(
+          contentId: postId,
+          liked: liked,
+          isTweet: isTweet,
+        );
+        return liked;
+      }
+      // As a final fallback, re-fetch the post to derive authoritative state.
+      try {
+        final post = (isTweet == true)
+            ? await _tweetsApi.getTweet(postId)
+            : await _postsApi.getPost(postId);
+        final isLikedByMe = parseLiked(post);
+        if (isLikedByMe != null) {
+          ContentSyncService().publishLike(
+            contentId: postId,
+            liked: isLikedByMe,
+            isTweet: isTweet,
+          );
+          return isLikedByMe;
+        }
+      } catch (_) {}
+      ContentSyncService().publishLike(
+        contentId: postId,
+        liked: like,
+        isTweet: isTweet,
+      );
+      return like;
+    } on BadRequestException {
+      // Already in desired state; fetch current state to avoid incorrect flips.
+      try {
+        final post = (isTweet == true)
+            ? await _tweetsApi.getTweet(postId)
+            : await _postsApi.getPost(postId);
+        final isLikedByMe = parseLiked(post);
+        if (isLikedByMe != null) {
+          ContentSyncService().publishLike(
+            contentId: postId,
+            liked: isLikedByMe,
+            isTweet: isTweet,
+          );
+          return isLikedByMe;
+        }
+      } catch (_) {}
+      ContentSyncService().publishLike(
+        contentId: postId,
+        liked: like,
+        isTweet: isTweet,
+      );
+      return like;
+    } on UnauthorizedException {
+      // Token missing/expired – cannot persist. Try to read current state; otherwise keep desired for UI.
+      try {
+        final post = (isTweet == true)
+            ? await _tweetsApi.getTweet(postId)
+            : await _postsApi.getPost(postId);
+        final isLikedByMe = parseLiked(post);
+        if (isLikedByMe != null) {
+          ContentSyncService().publishLike(
+            contentId: postId,
+            liked: isLikedByMe,
+            isTweet: isTweet,
+          );
+          return isLikedByMe;
+        }
+      } catch (_) {}
+      ContentSyncService().publishLike(
+        contentId: postId,
+        liked: like,
+        isTweet: isTweet,
+      );
+      return like;
+    } catch (_) {
+      if (isTweet == false) {
+        ContentSyncService().publishLike(
+          contentId: postId,
+          liked: like,
+          isTweet: isTweet,
+        );
+        return like;
+      }
+      // Fallback: if caller didn't know content type, try tweet like/unlike.
+      try {
+        final res = like
+            ? await _tweetsApi.likeTweet(postId)
+            : await _tweetsApi.unlikeTweet(postId);
+        final liked = parseLiked(res);
+        if (liked != null) {
+          ContentSyncService().publishLike(
+            contentId: postId,
+            liked: liked,
+            isTweet: true,
+          );
+          return liked;
+        }
+      } catch (_) {}
+      // Network or other error – avoid flipping; best-effort read of server state failed.
+      ContentSyncService().publishLike(
+        contentId: postId,
+        liked: like,
+        isTweet: isTweet,
+      );
+      return like;
+    }
+  }
+
+  Future<bool> setPostSaved(String postId,
+      {required bool save, bool? isTweet}) async {
+    // Tweets are not saved/bookmarked in the React client.
+    if (isTweet == true) return false;
+    bool result = save;
+    try {
+      final res = save
+          ? await _postsApi.savePost(postId)
+          : await _postsApi.unsavePost(postId);
+      final saved = res['saved'] as bool?;
+      if (saved != null) result = saved;
+      final isSavedByMe = res['is_saved_by_me'] as bool?;
+      if (isSavedByMe != null) result = isSavedByMe;
+      if (saved == null && isSavedByMe == null) {
+        try {
+          final post = await _postsApi.getPost(postId);
+          final postSaved = post['is_saved_by_me'] as bool?;
+          if (postSaved != null) result = postSaved;
+        } catch (_) {}
+      }
+    } on BadRequestException {
+      try {
+        final post = await _postsApi.getPost(postId);
+        final postSaved = post['is_saved_by_me'] as bool?;
+        if (postSaved != null) result = postSaved;
+      } catch (_) {}
+    } on UnauthorizedException {
+      try {
+        final post = await _postsApi.getPost(postId);
+        final postSaved = post['is_saved_by_me'] as bool?;
+        if (postSaved != null) result = postSaved;
+      } catch (_) {}
+    } catch (_) {
+      result = save;
+    }
+    await _updateLocalSaved(postId, result);
+    ContentSyncService().publishSave(
+      contentId: postId,
+      saved: result,
+      isTweet: isTweet,
+    );
+    return result;
+  }
+
+  /// Get users who liked a post.
+  ///
+  /// Returns a list of user objects: `{ id, _id, username, full_name, avatar_url }`.
+  Future<List<Map<String, dynamic>>> getPostLikes(String postId) async {
+    try {
+      final res = await _postsApi.getLikes(postId);
+      final users = res['users'] as List<dynamic>? ?? [];
+      return users
+          .whereType<Map>()
+          .map((m) => Map<String, dynamic>.from(m))
+          .toList();
+    } catch (_) {
+      return [];
+    }
+  }
+
+  // ── Ads & Products ─────────────────────────────────────────────────────────
+  // These are not part of the new API docs. Keep stubs returning empty data.
+
+  Future<List<Map<String, dynamic>>> fetchAds(
+      {int limit = 20, int offset = 0}) async {
+    return [];
+  }
+
+  Future<Map<String, dynamic>?> getProductById(String productId) async {
+    return null;
+  }
+
+  // ── Users list ─────────────────────────────────────────────────────────────
+
+  Future<List<Map<String, dynamic>>> fetchUsers(
+      {String? excludeUserId, int limit = 100}) async {
+    // Not available in the new REST API; provide a static fallback so StoriesRow
+    // renders similarly to the web app's StoryRail.
+    final samples = <Map<String, dynamic>>[
+      {
+        'id': 'u-your',
+        'username': 'your_story',
+        'avatar_url':
+            'https://images.unsplash.com/photo-1515886657613-9f3515b0c78f?w=300&auto=format&fit=crop&q=60'
+      },
+      {
+        'id': 'u-2',
+        'username': 'jane_doe',
+        'avatar_url':
+            'https://images.unsplash.com/photo-1502602898657-3e91760cbb34?w=300&auto=format&fit=crop&q=60'
+      },
+      {
+        'id': 'u-3',
+        'username': 'john_smith',
+        'avatar_url':
+            'https://images.unsplash.com/photo-1504674900247-0877df9cc836?w=300&auto=format&fit=crop&q=60'
+      },
+      {
+        'id': 'u-4',
+        'username': 'travel_lover',
+        'avatar_url':
+            'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=300&auto=format&fit=crop&q=60'
+      },
+      {
+        'id': 'u-5',
+        'username': 'foodie_life',
+        'avatar_url':
+            'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=300&auto=format&fit=crop&q=60'
+      },
+      {
+        'id': 'u-6',
+        'username': 'tech_guru',
+        'avatar_url':
+            'https://images.unsplash.com/photo-1517841905240-472988babdf9?w=300&auto=format&fit=crop&q=60'
+      },
+      {
+        'id': 'u-7',
+        'username': 'art_daily',
+        'avatar_url':
+            'https://images.unsplash.com/photo-1517841905240-472988babdf9?w=300&auto=format&fit=crop&q=60'
+      },
+    ];
+    if (excludeUserId != null && excludeUserId.isNotEmpty) {
+      return samples
+          .where((u) => u['id'] != excludeUserId)
+          .take(limit)
+          .toList();
+    }
+    return samples.take(limit).toList();
+  }
+
+  Future<List<Map<String, dynamic>>> searchUsersByUsername(String query,
+      {int limit = 20}) async {
+    // Not available in the new REST API.
+    return [];
+  }
+
+  // ── Wallet ─────────────────────────────────────────────────────────────────
+  // Wallet endpoints are not defined in the new API docs yet.
+  // Keeping Supabase-less stubs so the app compiles.
+
+  Future<int> getCoinBalance(String userId) async {
+    return 0;
+  }
+
+  Future<List<Map<String, dynamic>>> getTransactions(String userId,
+      {int limit = 50}) async {
+    return [];
+  }
+
+  Future<bool> rewardUserForAdView(
+      String userId, String adId, int amount) async {
+    return false;
+  }
+
+  Future<bool> deletePost(String postId, {bool? isTweet}) async {
+    try {
+      if (isTweet == true) {
+        await _tweetsApi.deleteTweet(postId);
+      } else {
+        await _postsApi.deletePost(postId);
+      }
+      return true;
+    } on ApiException {
+      rethrow;
+    } catch (e) {
+      throw ServerException(message: e.toString());
+    }
+  }
+}

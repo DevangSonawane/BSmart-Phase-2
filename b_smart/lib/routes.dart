@@ -1,0 +1,123 @@
+import 'package:flutter/widgets.dart';
+import 'screens/auth/login/login_screen.dart';
+import 'screens/auth/signup_screen.dart';
+import 'screens/auth/forgot_password_screen.dart';
+import 'screens/auth/verify_otp_screen.dart';
+import 'screens/home_dashboard.dart';
+import 'screens/create_upload_screen.dart';
+import 'screens/reels_screen.dart';
+import 'screens/ads_page_screen.dart';
+import 'screens/promote_screen.dart';
+import 'screens/settings_screen.dart';
+import 'screens/account_details_screen.dart';
+import 'screens/wallet_screen.dart';
+import 'screens/redeem_gift_cards_screen.dart';
+import 'screens/redemption_requests_screen.dart';
+import 'screens/voucher_details_screen.dart';
+import 'screens/notifications_screen.dart';
+import 'screens/privacy_screen.dart';
+import 'screens/security_screen.dart';
+import 'screens/contact_support_screen.dart';
+import 'screens/faq_screen.dart';
+import 'screens/auth_callback_screen.dart';
+import 'screens/story_camera_screen.dart';
+import 'screens/own_story_viewer_screen.dart';
+import 'screens/search_screen.dart';
+import 'screens/search_explore_screen.dart';
+import 'screens/tweet_composer/tweet_composer_page.dart';
+import 'screens/follow_requests_screen.dart';
+import 'screens/advertiser_ads_list_screen.dart';
+import 'screens/advertiser_create_ad_screen.dart';
+import 'screens/role_redirect_gate.dart';
+import '../models/media_model.dart';
+import 'screens/edit_video_screen.dart';
+
+final RouteObserver<PageRoute<dynamic>> appRouteObserver =
+    RouteObserver<PageRoute<dynamic>>();
+
+/// Centralized route definitions matching the React app structure.
+///
+/// NOTE: '/profile' and '/post' are intentionally NOT in this map.
+/// They are dynamic routes handled by onGenerateRoute in main.dart:
+///   /profile/:userId  → ProfileScreen(userId: userId)
+///   /post/:postId     → PostDetailScreen(postId: postId)
+///
+/// Putting '/profile' here as a static route would intercept
+/// pushNamed('/profile/someId') and strip the userId segment,
+/// causing ProfileScreen to receive null and show the wrong user.
+final Map<String, WidgetBuilder> appRoutes = {
+  '/login': (ctx) => const LoginScreen(),
+  '/signup': (ctx) => const SignupScreen(),
+  '/forgot-password': (ctx) => const ForgotPasswordScreen(),
+  '/verify-otp': (ctx) {
+    final email = ModalRoute.of(ctx)?.settings.arguments as String?;
+    return VerifyOtpScreen(email: email);
+  },
+  '/home': (ctx) => const HomeDashboard(),
+  '/create_post': (ctx) => const CreateUploadScreen(
+        initialMode: UploadMode.post,
+      ),
+  '/create': (ctx) => const CreateUploadScreen(
+        initialMode: UploadMode.post,
+      ),
+  // '/profile' is intentionally removed — handled by onGenerateRoute
+  '/reels': (ctx) {
+    final args = ModalRoute.of(ctx)?.settings.arguments;
+    final initialId = (args is Map ? args['initialReelId'] : null)?.toString();
+    return ReelsScreen(initialReelId: initialId);
+  },
+  // Mirrors React: vendors are redirected off `/ads` to `/vendor-ads`.
+  '/ads': (ctx) => const RoleRedirectGate(
+        requireVendor: false,
+        redirectTo: '/vendor-ads',
+        child: AdsPageScreen(),
+      ),
+  // Mirrors React: vendors are redirected off `/ads` to `/vendor-ads`.
+  '/vendor-ads': (ctx) => const RoleRedirectGate(
+        requireVendor: true,
+        redirectTo: '/ads',
+        child: AdsPageScreen(),
+      ),
+  // Mirrors React: vendors manage campaigns under `/vendor/ads-management`.
+  '/vendor/ads-management': (ctx) => const RoleRedirectGate(
+        requireVendor: true,
+        redirectTo: '/ads',
+        child: AdvertiserAdsListScreen(),
+      ),
+  '/vendor/ads-management/create': (ctx) => const RoleRedirectGate(
+        requireVendor: true,
+        redirectTo: '/ads',
+        child: AdvertiserCreateAdScreen(),
+      ),
+  '/promote': (ctx) {
+    final args = ModalRoute.of(ctx)?.settings.arguments;
+    final reelId = args is Map ? args['reelId']?.toString() : null;
+    return PromoteScreen(initialReelId: reelId);
+  },
+  '/settings': (ctx) => const SettingsScreen(),
+  '/wallet': (ctx) => const WalletScreen(),
+  '/wallet/redeem-gift-cards': (ctx) => const RedeemGiftCardsScreen(),
+  '/wallet/redemption-requests': (ctx) => const RedemptionRequestsScreen(),
+  '/wallet/voucher-details': (ctx) => const VoucherDetailsScreen(),
+  '/notifications': (ctx) => const NotificationsScreen(),
+  '/privacy': (ctx) => const PrivacyScreen(),
+  '/contact-support': (ctx) => const ContactSupportScreen(),
+  '/faqs': (ctx) => const FaqScreen(),
+  '/follow-requests': (ctx) => const FollowRequestsScreen(),
+  '/security': (ctx) => const SecurityScreen(),
+  // Explore-first search flow: show explore grid, tap search bar to open search input.
+  '/search': (ctx) => const ExploreSearchScreen(),
+  '/search/input': (ctx) => const SearchScreen(),
+  '/tweet': (ctx) => const TweetComposerPage(),
+  '/auth/google/success': (ctx) => const AuthCallbackScreen(),
+  '/edit-profile': (ctx) => const AccountDetailsScreen(),
+  '/story-camera': (ctx) => const StoryCameraScreen(),
+  '/own-story-viewer': (ctx) {
+    return const OwnStoryViewerScreen(stories: [], userName: 'You');
+  },
+  '/edit_video': (ctx) {
+    final args = ModalRoute.of(ctx)?.settings.arguments;
+    final media = args is MediaItem ? args : null;
+    return EditVideoScreen(media: media!);
+  },
+};

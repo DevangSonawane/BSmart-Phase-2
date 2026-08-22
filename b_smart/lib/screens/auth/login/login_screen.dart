@@ -1,0 +1,531 @@
+import 'package:flutter/material.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
+import 'package:flutter_redux/flutter_redux.dart';
+import '../../../theme/instagram_theme.dart';
+import '../../../widgets/clay_container.dart';
+import '../../../services/auth/auth_service.dart';
+import '../../../services/session_reset_service.dart';
+import '../../../utils/app_error_handler.dart';
+import '../../../state/app_state.dart';
+import '../../../state/auth_actions.dart';
+import '../../home_dashboard.dart';
+import '../google_sign_in_button.dart';
+// Using native GoogleSignIn / secure browser flows; no embedded WebView
+
+class LoginScreen extends StatefulWidget {
+  const LoginScreen({super.key});
+
+  @override
+  State<LoginScreen> createState() => _LoginScreenState();
+}
+
+class _LoginScreenState extends State<LoginScreen>
+    with SingleTickerProviderStateMixin {
+  final _formKey = GlobalKey<FormState>();
+  final _identifierController = TextEditingController();
+  final _passwordController = TextEditingController();
+  bool _isPasswordVisible = false;
+  bool _isLoading = false;
+  bool _isVerifyingOtp = false;
+
+  late AnimationController _animationController;
+  late Animation<double> _fadeAnimation;
+
+  final AuthService _authService = AuthService();
+
+  @override
+  void initState() {
+    super.initState();
+    _animationController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1000),
+    );
+    _fadeAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
+      CurvedAnimation(parent: _animationController, curve: Curves.easeOut),
+    );
+    _animationController.forward();
+  }
+
+  @override
+  void dispose() {
+    _identifierController.dispose();
+    _passwordController.dispose();
+    _animationController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _handleLogin() async {
+    if (!_formKey.currentState!.validate()) {
+      return;
+    }
+
+    setState(() => _isLoading = true);
+
+    try {
+      final identifier = _identifierController.text.trim();
+      final password = _passwordController.text;
+      final outcome = await _authService.login(
+        identifier: identifier,
+        password: password,
+      );
+
+      if (outcome.requires2fa) {
+        if (!mounted) return;
+        await _showOtpDialog(
+          identifier: identifier,
+          password: password,
+          email: outcome.email ?? identifier,
+          message: outcome.message,
+        );
+      } else {
+        await SessionResetService.instance.clearUserSessionState();
+        final userId = outcome.user?.id ?? '';
+        if (userId.isNotEmpty && mounted) {
+          StoreProvider.of<AppState>(context)
+              .dispatch(SetAuthenticated(userId));
+        }
+        _navigateToHome();
+      }
+    } catch (e, st) {
+      AppErrorHandler.logError('login', e, st);
+      _showError(AppErrorHandler.userMessage(
+        e,
+        fallback: 'Unable to sign in. Please try again.',
+      ));
+    } finally {
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
+    }
+  }
+
+  Color _fieldFillColor(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Theme.of(context).brightness == Brightness.dark
+        ? scheme.surfaceContainerHighest.withValues(alpha: 0.55)
+        : Colors.white;
+  }
+
+  Color _fieldTextColor(BuildContext context) {
+    return Theme.of(context).colorScheme.onSurface;
+  }
+
+  InputDecoration _fieldDecoration(
+    BuildContext context, {
+    required String labelText,
+    required String hintText,
+    required IconData icon,
+    Widget? suffixIcon,
+  }) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final fillColor = isDark
+        ? theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.55)
+        : Colors.white;
+    final mutedColor = theme.colorScheme.onSurfaceVariant;
+
+    return InputDecoration(
+      labelText: labelText,
+      hintText: hintText,
+      labelStyle: TextStyle(color: mutedColor),
+      hintStyle: TextStyle(color: mutedColor),
+      prefixIcon: Icon(icon, color: mutedColor),
+      suffixIcon: suffixIcon,
+      filled: true,
+      fillColor: fillColor,
+      contentPadding: const EdgeInsets.symmetric(
+        horizontal: 16,
+        vertical: 18,
+      ),
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(14),
+        borderSide: const BorderSide(
+          color: InstagramTheme.borderGrey,
+          width: 1,
+        ),
+      ),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(14),
+        borderSide: const BorderSide(
+          color: InstagramTheme.borderGrey,
+          width: 1,
+        ),
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(14),
+        borderSide: const BorderSide(
+          color: InstagramTheme.accentBlue,
+          width: 1.6,
+        ),
+      ),
+      errorBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(14),
+        borderSide: const BorderSide(
+          color: InstagramTheme.errorRed,
+          width: 1,
+        ),
+      ),
+      focusedErrorBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(14),
+        borderSide: const BorderSide(
+          color: InstagramTheme.errorRed,
+          width: 1.6,
+        ),
+      ),
+    );
+  }
+
+  Future<void> _showOtpDialog({
+    required String identifier,
+    required String password,
+    required String email,
+    String? message,
+  }) async {
+    final otpController = TextEditingController();
+    String? localError;
+
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: !_isVerifyingOtp,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (ctx, setLocalState) {
+            Future<void> verify() async {
+              final otp = otpController.text.trim();
+              if (otp.length < 6) {
+                setLocalState(() => localError = 'Enter the 6-digit OTP.');
+                return;
+              }
+              setState(() => _isVerifyingOtp = true);
+              setLocalState(() => localError = null);
+              try {
+                final result = await _authService.login(
+                  identifier: identifier,
+                  password: password,
+                  otp: otp,
+                );
+                if (!mounted) return;
+                if (result.requires2fa) {
+                  setLocalState(() => localError = 'Invalid OTP. Try again.');
+                  return;
+                }
+                if (!ctx.mounted) return;
+                Navigator.of(ctx).pop();
+                await SessionResetService.instance.clearUserSessionState();
+                final userId = result.user?.id ?? '';
+                if (userId.isNotEmpty && mounted) {
+                  StoreProvider.of<AppState>(context)
+                      .dispatch(SetAuthenticated(userId));
+                }
+                _navigateToHome();
+              } catch (e, st) {
+                AppErrorHandler.logError('login-otp', e, st);
+                setLocalState(() {
+                  localError = AppErrorHandler.userMessage(
+                    e,
+                    fallback: 'Unable to verify the code. Please try again.',
+                  );
+                });
+              } finally {
+                if (mounted) setState(() => _isVerifyingOtp = false);
+              }
+            }
+
+            return AlertDialog(
+              title: const Text('Enter OTP'),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    'We sent a 6-digit verification code to $email.',
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                  if (message != null && message.isNotEmpty) ...[
+                    const SizedBox(height: 8),
+                    Text(message, style: Theme.of(context).textTheme.bodySmall),
+                  ],
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: otpController,
+                    style: TextStyle(color: _fieldTextColor(context)),
+                    keyboardType: TextInputType.number,
+                    maxLength: 6,
+                    textAlign: TextAlign.center,
+                    decoration: InputDecoration(
+                      hintText: '000000',
+                      counterText: '',
+                      errorText: localError,
+                      filled: true,
+                      fillColor: _fieldFillColor(context),
+                    ),
+                    onChanged: (v) {
+                      final digits = v.replaceAll(RegExp(r'\\D'), '');
+                      if (digits != v) otpController.text = digits;
+                      if (digits.length > 6) {
+                        otpController.text = digits.substring(0, 6);
+                      }
+                      otpController.selection = TextSelection.fromPosition(
+                        TextPosition(offset: otpController.text.length),
+                      );
+                    },
+                    onSubmitted: (_) => verify(),
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed:
+                      _isVerifyingOtp ? null : () => Navigator.of(ctx).pop(),
+                  child: const Text('Cancel'),
+                ),
+                FilledButton(
+                  onPressed: _isVerifyingOtp ? null : verify,
+                  child: _isVerifyingOtp
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Text('Verify'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+
+    otpController.dispose();
+  }
+
+  void _navigateToHome() {
+    if (mounted) {
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute(
+          builder: (context) => const HomeDashboard(),
+        ),
+      );
+    }
+  }
+
+  void _showError(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: InstagramTheme.errorRed,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final size = MediaQuery.of(context).size;
+    final isTablet = size.width > 600;
+    final maxWidth = isTablet ? 500.0 : size.width;
+    final successMessage =
+        ModalRoute.of(context)?.settings.arguments as String?;
+
+    return Scaffold(
+      body: SafeArea(
+        child: Center(
+          child: SingleChildScrollView(
+            padding: InstagramTheme.responsivePadding(context),
+            child: FadeTransition(
+              opacity: _fadeAnimation,
+              child: ConstrainedBox(
+                constraints: BoxConstraints(maxWidth: maxWidth),
+                child: Form(
+                  key: _formKey,
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      const SizedBox(height: 40),
+                      if (successMessage != null && successMessage.isNotEmpty)
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 16),
+                          child: Container(
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: Colors.green.shade50,
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(color: Colors.green.shade100),
+                            ),
+                            child: Row(
+                              children: [
+                                Icon(LucideIcons.circleCheck,
+                                    color: Colors.green.shade700, size: 20),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                    child: Text(successMessage,
+                                        style: TextStyle(
+                                            color: Colors.green.shade800,
+                                            fontSize: 13))),
+                              ],
+                            ),
+                          ),
+                        ),
+                      const SizedBox(height: 24),
+                      Center(
+                        child: Image.asset(
+                          'assets/images/bsmart_logo.png',
+                          width: isTablet ? 220 : 180,
+                          fit: BoxFit.contain,
+                        ),
+                      ),
+                      const SizedBox(height: 18),
+                      Text(
+                        'Enter your credentials to access your account.',
+                        textAlign: TextAlign.center,
+                        style: Theme.of(context).textTheme.bodyMedium,
+                      ),
+                      const SizedBox(height: 32),
+                      TextFormField(
+                        controller: _identifierController,
+                        keyboardType: TextInputType.emailAddress,
+                        autofillHints: const [AutofillHints.email],
+                        style: TextStyle(color: _fieldTextColor(context)),
+                        decoration: _fieldDecoration(
+                          context,
+                          labelText: 'Email Address',
+                          hintText: 'john@example.com',
+                          icon: LucideIcons.mail,
+                        ),
+                        validator: (value) {
+                          final email = (value ?? '').trim();
+                          if (email.isEmpty) {
+                            return 'Please enter your email address';
+                          }
+                          if (!email.contains('@') || !email.contains('.')) {
+                            return 'Please enter a valid email address';
+                          }
+                          return null;
+                        },
+                      ),
+                      const SizedBox(height: 14),
+                      TextFormField(
+                        controller: _passwordController,
+                        obscureText: !_isPasswordVisible,
+                        autofillHints: const [AutofillHints.password],
+                        style: TextStyle(color: _fieldTextColor(context)),
+                        decoration: _fieldDecoration(
+                          context,
+                          labelText: 'Password',
+                          hintText: '••••••••',
+                          icon: LucideIcons.keyRound,
+                          suffixIcon: IconButton(
+                            icon: Icon(
+                              _isPasswordVisible
+                                  ? LucideIcons.eye
+                                  : LucideIcons.eyeOff,
+                              color: InstagramTheme.textGrey,
+                            ),
+                            onPressed: () {
+                              setState(() {
+                                _isPasswordVisible = !_isPasswordVisible;
+                              });
+                            },
+                          ),
+                        ),
+                        validator: (value) {
+                          if (value == null || value.isEmpty) {
+                            return 'Please enter your password';
+                          }
+                          if (value.length < 6) {
+                            return 'Password must be at least 6 characters';
+                          }
+                          return null;
+                        },
+                      ),
+                      const SizedBox(height: 12),
+                      // Forgot Password
+                      Align(
+                        alignment: Alignment.centerRight,
+                        child: TextButton(
+                          onPressed: () {
+                            Navigator.of(context).pushNamed('/forgot-password');
+                          },
+                          child: const Text('Forgot Password?'),
+                        ),
+                      ),
+                      const SizedBox(height: 40),
+
+                      // Login Button
+                      SizedBox(
+                        height: 56,
+                        child: ClayButton(
+                          onPressed: _isLoading ? null : _handleLogin,
+                          child: _isLoading
+                              ? const SizedBox(
+                                  height: 24,
+                                  width: 24,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2.5,
+                                    valueColor: AlwaysStoppedAnimation<Color>(
+                                        InstagramTheme.textWhite),
+                                  ),
+                                )
+                              : const Text('LOGIN'),
+                        ),
+                      ),
+                      const SizedBox(height: 32),
+
+                      // Divider
+                      Row(
+                        children: [
+                          const Expanded(
+                            child: Divider(color: InstagramTheme.dividerGrey),
+                          ),
+                          Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 16),
+                            child: Text(
+                              'OR',
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .bodyMedium
+                                  ?.copyWith(
+                                    fontSize: 12,
+                                    letterSpacing: 1.5,
+                                  ),
+                            ),
+                          ),
+                          const Expanded(
+                            child: Divider(color: InstagramTheme.dividerGrey),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 32),
+
+                      // Google Sign In Button
+                      const GoogleSignInButton(),
+                      const SizedBox(height: 32),
+
+                      // Sign Up Link
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Text(
+                            "Don't have an account? ",
+                            style: Theme.of(context).textTheme.bodyMedium,
+                          ),
+                          TextButton(
+                            onPressed: () =>
+                                Navigator.of(context).pushNamed('/signup'),
+                            child: const Text('Sign Up'),
+                          ),
+                        ],
+                      ),
+                      SizedBox(height: isTablet ? 40 : 20),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}

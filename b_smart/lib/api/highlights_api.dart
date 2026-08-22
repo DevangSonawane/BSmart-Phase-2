@@ -1,0 +1,176 @@
+import 'api_client.dart';
+import '../config/api_config.dart';
+import 'api_exceptions.dart';
+import 'package:flutter/foundation.dart';
+
+class HighlightsApi {
+  final ApiClient _client = ApiClient();
+
+  String get _basePath {
+    final base =
+        ApiConfig.baseUrl.toLowerCase().trim().replaceAll(RegExp(r'\/+$'), '');
+    final endsWithApi = base.endsWith('/api');
+    return endsWithApi ? '' : '/api';
+  }
+
+  String _path(String suffix) => '$_basePath$suffix';
+
+  // ── 1. Create Highlight ──────────────────────────────────────────────────
+
+  /// POST /api/highlights
+  /// Creates a new empty highlight. Returns the created highlight map.
+  Future<Map<String, dynamic>> create({
+    required String title,
+    String? coverUrl,
+  }) async {
+    final body = <String, dynamic>{'title': title.trim()};
+    if (coverUrl != null && coverUrl.trim().isNotEmpty) {
+      body['cover_url'] = coverUrl.trim();
+    }
+    final res = await _client.post(_path('/highlights'), body: body);
+    return (res as Map).cast<String, dynamic>();
+  }
+
+  // ── 2. Get User Highlights ───────────────────────────────────────────────
+
+  /// GET /api/highlights/user/{userId}
+  /// Returns highlights sorted by order ascending.
+  Future<List<Map<String, dynamic>>> userHighlights(String userId) async {
+    final res = await _client.get(_path('/highlights/user/$userId'));
+    if (res is List) {
+      return res.whereType<Map>().map((e) => e.cast<String, dynamic>()).toList();
+    }
+    if (res is Map) {
+      final dynamic list = res['highlights'] ?? res['data'] ?? res['items'];
+      if (list is List) {
+        return list
+            .whereType<Map>()
+            .map((e) => e.cast<String, dynamic>())
+            .toList();
+      }
+    }
+    return const <Map<String, dynamic>>[];
+  }
+
+  // ── 3. Add Story Items to Highlight ─────────────────────────────────────
+
+  /// POST /api/highlights/{id}/items
+  /// Attaches story items to a highlight. Duplicates are ignored.
+  /// Returns { success: true, items_count: N }
+  Future<Map<String, dynamic>> addItems(
+    String highlightId,
+    List<String> storyItemIds,
+  ) async {
+    assert(() {
+      debugPrint(
+        'HighlightsApi.addItems highlightId=$highlightId ids=${storyItemIds.take(5).toList()} count=${storyItemIds.length}',
+      );
+      return true;
+    }());
+
+    Future<Map<String, dynamic>> postWithBody(Map<String, dynamic> body) async {
+      final res = await _client.post(
+        _path('/highlights/$highlightId/items'),
+        body: body,
+      );
+      return (res as Map).cast<String, dynamic>();
+    }
+
+    // Primary (documented) payload.
+    try {
+      final res = await postWithBody(<String, dynamic>{
+        'story_item_ids': storyItemIds,
+      });
+      final count = (res['items_count'] as num?)?.toInt() ??
+          (res['itemsCount'] as num?)?.toInt();
+      if (count != null && count == 0 && storyItemIds.isNotEmpty) {
+        // Some backends accept the request but ignore the key; try common alternates.
+        return await postWithBody(<String, dynamic>{
+          'storyItemIds': storyItemIds,
+          'story_ids': storyItemIds,
+          'storyIds': storyItemIds,
+          'itemIds': storyItemIds,
+        });
+      }
+      return res;
+    } on BadRequestException {
+      // Validation schema mismatch; try common alternates.
+      return postWithBody(<String, dynamic>{
+        'storyItemIds': storyItemIds,
+        'story_ids': storyItemIds,
+        'storyIds': storyItemIds,
+        'itemIds': storyItemIds,
+      });
+    }
+  }
+
+  // ── 4. Get Highlight Items ───────────────────────────────────────────────
+
+  /// GET /api/highlights/{id}/items
+  /// Returns populated StoryItem data with _itemId and order fields.
+  /// NOTE: use _itemId (not _id) for delete-item calls.
+  Future<List<Map<String, dynamic>>> items(String highlightId) async {
+    final res = await _client.get(_path('/highlights/$highlightId/items'));
+    if (res is List) {
+      return res.whereType<Map>().map((e) => e.cast<String, dynamic>()).toList();
+    }
+    if (res is Map) {
+      final dynamic list = res['items'] ?? res['data'];
+      if (list is List) {
+        return list
+            .whereType<Map>()
+            .map((e) => e.cast<String, dynamic>())
+            .toList();
+      }
+    }
+    return const <Map<String, dynamic>>[];
+  }
+
+  // ── 5. Update Highlight ──────────────────────────────────────────────────
+
+  /// PATCH /api/highlights/{id}
+  /// Update title and/or cover_url. Omitted fields remain unchanged.
+  Future<Map<String, dynamic>> update(
+    String highlightId, {
+    String? title,
+    String? coverUrl,
+  }) async {
+    final body = <String, dynamic>{};
+    if (title != null && title.trim().isNotEmpty) {
+      body['title'] = title.trim();
+    }
+    if (coverUrl != null && coverUrl.trim().isNotEmpty) {
+      body['cover_url'] = coverUrl.trim();
+    }
+    final res = await _client.patch(
+      _path('/highlights/$highlightId'),
+      body: body,
+    );
+    return (res as Map).cast<String, dynamic>();
+  }
+
+  // ── 6. Remove One Item From Highlight ───────────────────────────────────
+
+  /// DELETE /api/highlights/{id}/items/{itemId}
+  /// IMPORTANT: itemId = _itemId from GET items response, NOT the story _id.
+  Future<Map<String, dynamic>> deleteItem(
+    String highlightId,
+    String highlightItemId,
+  ) async {
+    final res = await _client.delete(
+      _path('/highlights/$highlightId/items/$highlightItemId'),
+    );
+    if (res is Map) return res.cast<String, dynamic>();
+    return const <String, dynamic>{};
+  }
+
+  // ── 7. Delete Entire Highlight ───────────────────────────────────────────
+
+  /// DELETE /api/highlights/{id}
+  /// Deletes the highlight and all its items.
+  Future<Map<String, dynamic>> delete(String highlightId) async {
+    final res = await _client.delete(_path('/highlights/$highlightId'));
+    if (res is Map) return res.cast<String, dynamic>();
+    return const <String, dynamic>{};
+  }
+}
