@@ -165,14 +165,14 @@ class ProfileHomePage extends StatelessWidget {
   }) {
     return Material(
       color: Colors.black.withValues(alpha: 0.50),
-      borderRadius: BorderRadius.circular(16),
+      borderRadius: BorderRadius.circular(12),
       child: InkWell(
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(12),
         onTap: onTap,
         child: SizedBox(
-          width: 48,
-          height: 48,
-          child: Icon(icon, color: Colors.white, size: 22),
+          width: 40,
+          height: 40,
+          child: Icon(icon, color: Colors.white, size: 18),
         ),
       ),
     );
@@ -391,44 +391,50 @@ class ProfileHomePage extends StatelessWidget {
     );
   }
 
-  Widget _detailTile({
+  Widget _profileInfoTile({
     required IconData icon,
     required String label,
     required String value,
     Color iconColor = _gold,
   }) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 12),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Icon(icon, color: iconColor, size: 22),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  label,
-                  style: const TextStyle(
-                    color: Colors.white70,
-                    fontSize: 13,
-                  ),
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.only(top: 2),
+          child: Icon(icon, color: iconColor, size: 22),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  color: Colors.white70,
+                  fontSize: 13,
+                  height: 1.2,
                 ),
-                const SizedBox(height: 3),
-                Text(
-                  value,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 15,
-                    fontWeight: FontWeight.w600,
-                  ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                value,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 15,
+                  fontWeight: FontWeight.w500,
+                  height: 1.3,
                 ),
-              ],
-            ),
+              ),
+            ],
           ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 
@@ -441,30 +447,30 @@ class ProfileHomePage extends StatelessWidget {
     ];
 
     return Container(
-      padding: const EdgeInsets.all(1.5),
+      padding: const EdgeInsets.all(1.4),
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(30),
+        borderRadius: BorderRadius.circular(28),
         gradient: const LinearGradient(
           colors: <Color>[
-            Color(0xFFFFD56A),
-            Color(0xFFE8A928),
-            Color(0xFFFFF0C2),
-            Color(0xFFC88A12),
+            Color(0xFFFFE4A0),
+            Color(0xFFBA8615),
+            Color(0xFFF5D57A),
+            Color(0xFF7D560C),
           ],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
-          stops: [0.0, 0.33, 0.66, 1.0],
+          stops: [0.0, 0.28, 0.70, 1.0],
         ),
         boxShadow: [
           BoxShadow(
-            color: _gold.withValues(alpha: 0.32),
-            blurRadius: 34,
-            spreadRadius: 1,
+            color: _gold.withValues(alpha: 0.18),
+            blurRadius: 22,
+            spreadRadius: 0.5,
           ),
         ],
       ),
       child: ClipRRect(
-        borderRadius: BorderRadius.circular(28),
+        borderRadius: BorderRadius.circular(26),
         child: Stack(
           children: [
             const Positioned.fill(
@@ -472,9 +478,9 @@ class ProfileHomePage extends StatelessWidget {
                 decoration: BoxDecoration(
                   gradient: LinearGradient(
                     colors: [
-                      Color(0xFF2A1B0A),
-                      Color(0xFF0E0B08),
-                      Color(0xFF201409),
+                      Color(0xFF24160A),
+                      Color(0xFF0E0D0B),
+                      Color(0xFF1A120A),
                     ],
                     begin: Alignment.topLeft,
                     end: Alignment.bottomRight,
@@ -483,16 +489,16 @@ class ProfileHomePage extends StatelessWidget {
               ),
             ),
             Positioned(
-              top: -50,
-              left: -28,
+              top: -56,
+              left: -32,
               child: Container(
-                width: 140,
-                height: 140,
+                width: 160,
+                height: 160,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
                   gradient: RadialGradient(
                     colors: [
-                      const Color(0xFFFFF0C2).withValues(alpha: 0.36),
+                      const Color(0xFFFFF1C7).withValues(alpha: 0.34),
                       Colors.transparent,
                     ],
                   ),
@@ -501,15 +507,15 @@ class ProfileHomePage extends StatelessWidget {
             ),
             Positioned(
               right: -28,
-              bottom: -30,
+              bottom: -28,
               child: Container(
-                width: 120,
-                height: 120,
+                width: 136,
+                height: 136,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
                   gradient: RadialGradient(
                     colors: [
-                      Colors.white.withValues(alpha: 0.14),
+                      Colors.white.withValues(alpha: 0.08),
                       Colors.transparent,
                     ],
                   ),
@@ -522,7 +528,7 @@ class ProfileHomePage extends StatelessWidget {
                   decoration: BoxDecoration(
                     gradient: LinearGradient(
                       colors: [
-                        Colors.white.withValues(alpha: 0.12),
+                        Colors.white.withValues(alpha: 0.08),
                         Colors.transparent,
                         Colors.transparent,
                       ],
@@ -534,7 +540,7 @@ class ProfileHomePage extends StatelessWidget {
               ),
             ),
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 16),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 16),
               child: Row(
                 children: [
                   for (var i = 0; i < statItems.length; i++) ...[
@@ -690,7 +696,7 @@ class ProfileHomePage extends StatelessWidget {
         : username.trim();
     const tagline = <String>['Dreamer', 'Learner', 'Little Explorer'];
     final hobbies = _hobbies();
-    final showBadge = isValidated;
+    const showBadge = true;
 
     return Scaffold(
       backgroundColor: Colors.black,
@@ -716,7 +722,7 @@ class ProfileHomePage extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   SizedBox(
-                    height: 380,
+                    height: 340,
                     width: double.infinity,
                     child: Stack(
                       clipBehavior: Clip.none,
@@ -780,7 +786,7 @@ class ProfileHomePage extends StatelessWidget {
                           ),
                         ),
                         Positioned(
-                          top: topInset + 20,
+                          top: topInset + 14,
                           left: 16,
                           child: _topIconButton(
                             context: context,
@@ -789,7 +795,7 @@ class ProfileHomePage extends StatelessWidget {
                           ),
                         ),
                         Positioned(
-                          top: topInset + 20,
+                          top: topInset + 14,
                           right: 16,
                           child: _topIconButton(
                             context: context,
@@ -801,91 +807,99 @@ class ProfileHomePage extends StatelessWidget {
                         Positioned(
                           left: 0,
                           right: 0,
-                          bottom: -28,
+                          bottom: -12,
                           child: Center(
-                            child: Container(
-                              padding: const EdgeInsets.all(3),
-                              decoration: BoxDecoration(
-                                shape: BoxShape.circle,
-                                border: Border.all(
-                                  color: _goldSoft.withValues(alpha: 0.85),
-                                  width: 2.5,
-                                ),
-                                boxShadow: [
-                                  BoxShadow(
-                                    color: _gold.withValues(alpha: 0.35),
-                                    blurRadius: 22,
-                                    spreadRadius: 2,
+                            child: Stack(
+                              clipBehavior: Clip.none,
+                              children: [
+                                Container(
+                                  padding: const EdgeInsets.all(4),
+                                  decoration: BoxDecoration(
+                                    shape: BoxShape.circle,
+                                    border: Border.all(
+                                      color: _goldSoft.withValues(alpha: 0.92),
+                                      width: 2.4,
+                                    ),
+                                    boxShadow: [
+                                      BoxShadow(
+                                        color: _gold.withValues(alpha: 0.28),
+                                        blurRadius: 20,
+                                        spreadRadius: 0.8,
+                                      ),
+                                    ],
                                   ),
-                                ],
-                              ),
-                              child: CircleAvatar(
-                                radius: 58,
-                                backgroundColor: _panel,
-                                child: ClipOval(
-                                  child: SizedBox(
-                                    width: 116,
-                                    height: 116,
-                                    child: hasHero
-                                        ? SafeNetworkImage(
-                                            url: heroUrl,
-                                            headers: heroHeaders,
-                                            fit: BoxFit.cover,
-                                            placeholder: const ColoredBox(
-                                              color: Color(0xFF222222),
-                                            ),
-                                            errorWidget: const ColoredBox(
-                                              color: Color(0xFF222222),
-                                            ),
-                                          )
-                                        : const ColoredBox(
-                                            color: Color(0xFF222222),
+                                  child: CircleAvatar(
+                                    radius: 52,
+                                    backgroundColor: _panel,
+                                    child: ClipOval(
+                                      child: SizedBox(
+                                        width: 104,
+                                        height: 104,
+                                        child: hasHero
+                                            ? SafeNetworkImage(
+                                                url: heroUrl,
+                                                headers: heroHeaders,
+                                                fit: BoxFit.cover,
+                                                placeholder: const ColoredBox(
+                                                  color: Color(0xFF222222),
+                                                ),
+                                                errorWidget: const ColoredBox(
+                                                  color: Color(0xFF222222),
+                                                ),
+                                              )
+                                            : const ColoredBox(
+                                                color: Color(0xFF222222),
+                                              ),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                                if (showBadge)
+                                  Positioned(
+                                    right: 2,
+                                    bottom: 2,
+                                    child: Container(
+                                      width: 30,
+                                      height: 30,
+                                      decoration: BoxDecoration(
+                                        color: _gold,
+                                        borderRadius:
+                                            BorderRadius.circular(999),
+                                        border: Border.all(
+                                          color: Colors.black,
+                                          width: 2,
+                                        ),
+                                        boxShadow: [
+                                          BoxShadow(
+                                            color:
+                                                _gold.withValues(alpha: 0.42),
+                                            blurRadius: 14,
+                                            spreadRadius: 0.5,
                                           ),
+                                        ],
+                                      ),
+                                      child: const Icon(
+                                        Icons.check_rounded,
+                                        color: Colors.black,
+                                        size: 16,
+                                      ),
+                                    ),
                                   ),
-                                ),
-                              ),
+                              ],
                             ),
                           ),
                         ),
-                        if (showBadge)
-                          Positioned(
-                            left: 0,
-                            right: 0,
-                            bottom: -46,
-                            child: Center(
-                              child: Container(
-                                width: 34,
-                                height: 34,
-                                decoration: BoxDecoration(
-                                  color: _gold,
-                                  borderRadius: BorderRadius.circular(999),
-                                  boxShadow: [
-                                    BoxShadow(
-                                      color: _gold.withValues(alpha: 0.4),
-                                      blurRadius: 18,
-                                      spreadRadius: 1,
-                                    ),
-                                  ],
-                                ),
-                                child: const Icon(
-                                  Icons.verified_rounded,
-                                  color: Colors.black,
-                                  size: 18,
-                                ),
-                              ),
-                            ),
-                          ),
                       ],
                     ),
                   ),
-                  const SizedBox(height: 28),
+                  const SizedBox(height: 10),
                   Container(
                     color: Colors.black,
-                    padding: const EdgeInsets.fromLTRB(20, 40, 20, 180),
+                    padding: const EdgeInsets.fromLTRB(20, 16, 20, 180),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.center,
                       children: [
-                        const SizedBox(height: 14),
+                        const SizedBox(height: 8),
                         Wrap(
                           alignment: WrapAlignment.center,
                           crossAxisAlignment: WrapCrossAlignment.center,
@@ -971,109 +985,105 @@ class ProfileHomePage extends StatelessWidget {
                         const SizedBox(height: 24),
                         Container(
                           decoration: BoxDecoration(
-                            color: _panel.withValues(alpha: 0.94),
+                            gradient: const LinearGradient(
+                              colors: [
+                                Color(0xFF101010),
+                                Color(0xFF0E0E0E),
+                                Color(0xFF090909),
+                              ],
+                              begin: Alignment.topLeft,
+                              end: Alignment.bottomRight,
+                            ),
                             borderRadius: BorderRadius.circular(24),
                             border: Border.all(
-                              color: Colors.white.withValues(alpha: 0.06),
+                              color: Colors.white.withValues(alpha: 0.065),
                             ),
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withValues(alpha: 0.45),
+                                blurRadius: 24,
+                                offset: const Offset(0, 12),
+                              ),
+                            ],
                           ),
                           child: Padding(
-                            padding: const EdgeInsets.all(18),
-                            child: Column(
-                              children: [
-                                Row(
-                                  children: [
-                                    Expanded(
-                                      child: _detailTile(
-                                        icon: LucideIcons.calendarDays,
-                                        label: 'Date of Birth',
-                                        value: _dateLine(),
-                                      ),
-                                    ),
-                                    Container(
-                                      width: 1,
-                                      height: 74,
-                                      color:
-                                          Colors.white.withValues(alpha: 0.08),
-                                    ),
-                                    Expanded(
-                                      child: _detailTile(
-                                        icon: LucideIcons.heart,
-                                        label: 'Hobbies',
-                                        value: hobbies.take(3).join(', '),
-                                        iconColor: const Color(0xFFF99BC1),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                                Container(
-                                  height: 1,
-                                  color: Colors.white.withValues(alpha: 0.08),
-                                ),
-                                Row(
-                                  children: [
-                                    Expanded(
-                                      child: _detailTile(
-                                        icon: LucideIcons.mapPin,
-                                        label: 'Location',
-                                        value: _location(),
-                                      ),
-                                    ),
-                                    Container(
-                                      width: 1,
-                                      height: 74,
-                                      color:
-                                          Colors.white.withValues(alpha: 0.08),
-                                    ),
-                                    Expanded(
-                                      child: _detailTile(
-                                        icon: LucideIcons.bookOpen,
-                                        label: 'Favorite Subject',
-                                        value: _stringValue(
-                                          [
-                                            'favorite_subject',
-                                            'favoriteSubject'
-                                          ],
-                                          fallback: 'Art',
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 18,
+                              vertical: 18,
+                            ),
+                            child: IntrinsicHeight(
+                              child: Row(
+                                crossAxisAlignment: CrossAxisAlignment.stretch,
+                                children: [
+                                  Expanded(
+                                    child: Column(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        _profileInfoTile(
+                                          icon: LucideIcons.calendarDays,
+                                          label: 'Date of Birth',
+                                          value: _dateLine(),
                                         ),
-                                        iconColor: const Color(0xFFBA8CFF),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                                Container(
-                                  height: 1,
-                                  color: Colors.white.withValues(alpha: 0.08),
-                                ),
-                                Row(
-                                  children: [
-                                    Expanded(
-                                      child: _detailTile(
-                                        icon: LucideIcons.graduationCap,
-                                        label: 'Class',
-                                        value: _profession(),
-                                      ),
-                                    ),
-                                    Container(
-                                      width: 1,
-                                      height: 74,
-                                      color:
-                                          Colors.white.withValues(alpha: 0.08),
-                                    ),
-                                    Expanded(
-                                      child: _detailTile(
-                                        icon: LucideIcons.palette,
-                                        label: 'Favorite Color',
-                                        value: _stringValue(
-                                          ['favorite_color', 'favoriteColor'],
-                                          fallback: 'Pink',
+                                        const SizedBox(height: 18),
+                                        _profileInfoTile(
+                                          icon: LucideIcons.mapPin,
+                                          label: 'Location',
+                                          value: _location(),
                                         ),
-                                        iconColor: const Color(0xFFF99BC1),
-                                      ),
+                                        const SizedBox(height: 18),
+                                        _profileInfoTile(
+                                          icon: LucideIcons.graduationCap,
+                                          label: 'Class',
+                                          value: _profession(),
+                                        ),
+                                      ],
                                     ),
-                                  ],
-                                ),
-                              ],
+                                  ),
+                                  Container(
+                                    width: 1,
+                                    margin: const EdgeInsets.symmetric(
+                                      horizontal: 16,
+                                    ),
+                                    color: Colors.white.withValues(alpha: 0.08),
+                                  ),
+                                  Expanded(
+                                    child: Column(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        _profileInfoTile(
+                                          icon: LucideIcons.heart,
+                                          label: 'Hobbies',
+                                          value: hobbies.join(', '),
+                                          iconColor: const Color(0xFFF48FAF),
+                                        ),
+                                        const SizedBox(height: 18),
+                                        _profileInfoTile(
+                                          icon: LucideIcons.palette,
+                                          label: 'Favorite Color',
+                                          value: _stringValue(
+                                            ['favorite_color', 'favoriteColor'],
+                                            fallback: 'Pink',
+                                          ),
+                                          iconColor: const Color(0xFFB68CFF),
+                                        ),
+                                        const SizedBox(height: 18),
+                                        _profileInfoTile(
+                                          icon: LucideIcons.bookOpen,
+                                          label: 'Favorite Subject',
+                                          value: _stringValue(
+                                            [
+                                              'favorite_subject',
+                                              'favoriteSubject'
+                                            ],
+                                            fallback: 'Art',
+                                          ),
+                                          iconColor: const Color(0xFFB68CFF),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ],
+                              ),
                             ),
                           ),
                         ),

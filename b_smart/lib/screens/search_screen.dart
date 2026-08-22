@@ -168,12 +168,16 @@ class _SearchScreenState extends State<SearchScreen> {
       if (useEmail) {
         if (!privacyAllowsSearchByEmail(source)) return false;
         final email = (source['email'] ?? '').toString().toLowerCase();
-        return email.contains(q) || username.contains(q) || fullName.contains(q);
+        return email.contains(q) ||
+            username.contains(q) ||
+            fullName.contains(q);
       }
       if (usePhone) {
         if (!privacyAllowsSearchByPhone(source)) return false;
         final phone = (source['phone'] ?? '').toString().toLowerCase();
-        return phone.contains(q) || username.contains(q) || fullName.contains(q);
+        return phone.contains(q) ||
+            username.contains(q) ||
+            fullName.contains(q);
       }
       if (!privacyAllowsSearchByUsername(source)) return false;
       return username.contains(q) || fullName.contains(q);
@@ -346,10 +350,11 @@ class _SearchScreenState extends State<SearchScreen> {
       _users.isNotEmpty || _posts.isNotEmpty || _reels.isNotEmpty;
 
   void _showPostDetail(Map<String, dynamic> item) {
-    final postId = (item['_id'] ?? item['id'] ?? item['post_id'] ?? item['postId'])
-            ?.toString()
-            .trim() ??
-        '';
+    final postId =
+        (item['_id'] ?? item['id'] ?? item['post_id'] ?? item['postId'])
+                ?.toString()
+                .trim() ??
+            '';
     if (postId.isEmpty) return;
     if (_isAdPost(item)) {
       Navigator.of(context).pushNamed('/ad/$postId');
@@ -510,9 +515,17 @@ class _SearchScreenState extends State<SearchScreen> {
                       focusNode: _focusNode,
                       onChanged: _onInputChanged,
                       onSubmitted: _runSearch,
+                      textAlignVertical: TextAlignVertical.center,
                       decoration: const InputDecoration(
                         isCollapsed: true,
+                        filled: false,
+                        contentPadding: EdgeInsets.zero,
                         border: InputBorder.none,
+                        enabledBorder: InputBorder.none,
+                        focusedBorder: InputBorder.none,
+                        disabledBorder: InputBorder.none,
+                        errorBorder: InputBorder.none,
+                        focusedErrorBorder: InputBorder.none,
                         hintText: 'Search',
                       ),
                     ),
@@ -809,8 +822,7 @@ class _SearchScreenState extends State<SearchScreen> {
                                   onLoadMore: () => _loadMore('posts'),
                                   canLoadMore:
                                       _posts.length < (_totals['posts'] ?? 0),
-                                  isLoadingMore:
-                                      _loadingMore['posts'] == true,
+                                  isLoadingMore: _loadingMore['posts'] == true,
                                   isReel: false,
                                 ),
                                 _buildGridSection(
@@ -819,8 +831,7 @@ class _SearchScreenState extends State<SearchScreen> {
                                   onLoadMore: () => _loadMore('reels'),
                                   canLoadMore:
                                       _reels.length < (_totals['reels'] ?? 0),
-                                  isLoadingMore:
-                                      _loadingMore['reels'] == true,
+                                  isLoadingMore: _loadingMore['reels'] == true,
                                   isReel: true,
                                 ),
                                 if (filteredUsers.isNotEmpty &&
