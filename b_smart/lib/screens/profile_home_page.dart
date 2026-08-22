@@ -212,160 +212,135 @@ class ProfileHomePage extends StatelessWidget {
   }
 
   Future<void> _showQuickActionsSheet(
-    BuildContext context,
-    List<String> hobbies,
-  ) async {
-    await showModalBottomSheet<void>(
-      context: context,
-      backgroundColor: Colors.transparent,
-      builder: (sheetContext) {
-        return SafeArea(
-          child: Container(
-            margin: const EdgeInsets.all(12),
-            padding: const EdgeInsets.fromLTRB(16, 10, 16, 16),
-            decoration: BoxDecoration(
-              color: const Color(0xFF111111),
-              borderRadius: BorderRadius.circular(24),
-              border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
-            ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Container(
-                  width: 44,
-                  height: 4,
-                  decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.16),
-                    borderRadius: BorderRadius.circular(999),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                ListTile(
-                  contentPadding: EdgeInsets.zero,
-                  leading: const Icon(
-                    Icons.settings_rounded,
-                    color: _gold,
-                  ),
-                  title: const Text(
-                    'Settings',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                  subtitle: Text(
-                    'Open profile settings',
-                    style: TextStyle(
-                      color: Colors.white.withValues(alpha: 0.65),
-                    ),
-                  ),
-                  onTap: () {
-                    Navigator.of(sheetContext).pop();
-                    onMenu?.call();
-                  },
-                ),
-                const Divider(height: 1),
-                ListTile(
-                  contentPadding: EdgeInsets.zero,
-                  leading: const Icon(
-                    Icons.favorite_rounded,
-                    color: _goldSoft,
-                  ),
-                  title: const Text(
-                    'Hobbies',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                  subtitle: Text(
-                    'View hobbies and interests',
-                    style: TextStyle(
-                      color: Colors.white.withValues(alpha: 0.65),
-                    ),
-                  ),
-                  onTap: () {
-                    Navigator.of(sheetContext).pop();
-                    _showHobbiesSheet(context, hobbies);
-                  },
-                ),
-              ],
-            ),
-          ),
-        );
-      },
-    );
-  }
-
-  Future<void> _showQuickActionsMenu(
     BuildContext buttonContext,
     List<String> hobbies,
   ) async {
     final buttonBox = buttonContext.findRenderObject() as RenderBox?;
     final overlayBox =
         Overlay.of(buttonContext).context.findRenderObject() as RenderBox?;
-    if (buttonBox == null || overlayBox == null) {
-      await _showQuickActionsSheet(buttonContext, hobbies);
-      return;
-    }
+    const menuWidth = 190.0;
+    final position = buttonBox != null && overlayBox != null
+        ? buttonBox.localToGlobal(Offset.zero, ancestor: overlayBox)
+        : Offset.zero;
+    final left = buttonBox != null && overlayBox != null
+        ? (position.dx + buttonBox.size.width - menuWidth).clamp(
+            12.0,
+            overlayBox.size.width - menuWidth - 12.0,
+          )
+        : 12.0;
+    final top = buttonBox != null
+        ? position.dy + buttonBox.size.height + 8.0
+        : MediaQuery.of(buttonContext).padding.top + 62;
 
-    final position = RelativeRect.fromRect(
-      buttonBox.localToGlobal(Offset.zero, ancestor: overlayBox) &
-          buttonBox.size,
-      Offset.zero & overlayBox.size,
-    );
-
-    final action = await showMenu<String>(
+    await showGeneralDialog<void>(
       context: buttonContext,
-      position: position,
-      color: const Color(0xFF111111),
-      elevation: 14,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(18),
-        side: BorderSide(color: Colors.white.withValues(alpha: 0.08)),
-      ),
-      items: const [
-        PopupMenuItem<String>(
-          value: 'settings',
-          child: Row(
+      barrierDismissible: true,
+      barrierLabel: 'Quick actions',
+      barrierColor: Colors.black.withValues(alpha: 0.20),
+      transitionDuration: const Duration(milliseconds: 180),
+      pageBuilder: (dialogContext, animation, secondaryAnimation) {
+        return Material(
+          type: MaterialType.transparency,
+          child: Stack(
             children: [
-              Icon(Icons.settings_rounded, color: _gold, size: 18),
-              SizedBox(width: 10),
-              Text(
-                'Settings',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.w600,
+              Positioned(
+                left: left,
+                top: top,
+                child: Material(
+                  color: const Color(0xFF111111),
+                  borderRadius: BorderRadius.circular(20),
+                  child: Container(
+                    width: menuWidth,
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(
+                        color: Colors.white.withValues(alpha: 0.08),
+                      ),
+                    ),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        _quickActionRow(
+                          context: dialogContext,
+                          icon: Icons.settings_rounded,
+                          iconColor: _gold,
+                          title: 'Settings',
+                          onTap: () {
+                            Navigator.of(dialogContext).pop();
+                            onMenu?.call();
+                          },
+                        ),
+                        const SizedBox(height: 8),
+                        _quickActionRow(
+                          context: dialogContext,
+                          icon: Icons.favorite_rounded,
+                          iconColor: _goldSoft,
+                          title: 'Hobbies',
+                          onTap: () {
+                            Navigator.of(dialogContext).pop();
+                            _showHobbiesSheet(buttonContext, hobbies);
+                          },
+                        ),
+                      ],
+                    ),
+                  ),
                 ),
               ),
             ],
           ),
-        ),
-        PopupMenuItem<String>(
-          value: 'hobbies',
-          child: Row(
-            children: [
-              Icon(Icons.favorite_rounded, color: _goldSoft, size: 18),
-              SizedBox(width: 10),
-              Text(
-                'Hobbies',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ],
+        );
+      },
+      transitionBuilder: (context, animation, secondaryAnimation, child) {
+        final curved = CurvedAnimation(
+          parent: animation,
+          curve: Curves.easeOutCubic,
+          reverseCurve: Curves.easeInCubic,
+        );
+        return FadeTransition(
+          opacity: curved,
+          child: ScaleTransition(
+            scale: Tween<double>(begin: 0.965, end: 1.0).animate(curved),
+            alignment: Alignment.topRight,
+            child: child,
           ),
-        ),
-      ],
+        );
+      },
     );
+  }
 
-    if (!buttonContext.mounted || action == null) return;
-    if (action == 'settings') {
-      onMenu?.call();
-    } else if (action == 'hobbies') {
-      await _showHobbiesSheet(buttonContext, hobbies);
-    }
+  Widget _quickActionRow({
+    required BuildContext context,
+    required IconData icon,
+    required Color iconColor,
+    required String title,
+    required VoidCallback onTap,
+  }) {
+    return Material(
+      color: Colors.white.withValues(alpha: 0.03),
+      borderRadius: BorderRadius.circular(16),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(16),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+          child: Row(
+            children: [
+              Icon(icon, color: iconColor, size: 18),
+              const SizedBox(width: 12),
+              Text(
+                title,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 15,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   Future<void> _showHobbiesSheet(
@@ -902,7 +877,7 @@ class ProfileHomePage extends StatelessWidget {
                             builder: (buttonContext) => _topIconButton(
                               context: buttonContext,
                               icon: Icons.more_horiz_rounded,
-                              onTap: () => _showQuickActionsMenu(
+                              onTap: () => _showQuickActionsSheet(
                                 buttonContext,
                                 hobbies,
                               ),
