@@ -47,6 +47,7 @@ class ProfileHomePage extends StatelessWidget {
   static const Color _gold = Color(0xFFD4AF37);
   static const Color _goldSoft = Color(0xFFFFD77A);
   static const Color _panel = Color(0xFF101010);
+  static const String _missingText = 'Null';
 
   String _stringValue(List<String> keys, {String fallback = ''}) {
     final source = profile;
@@ -101,7 +102,7 @@ class ProfileHomePage extends StatelessWidget {
       'hometown',
       'address',
       'place',
-    ]);
+    ], fallback: '');
     if (direct.isNotEmpty) return _titleCase(direct);
     final city = _stringValue(['city']);
     final state = _stringValue(['state', 'province']);
@@ -110,7 +111,7 @@ class ProfileHomePage extends StatelessWidget {
         .where((part) => part.trim().isNotEmpty)
         .toList();
     if (parts.isNotEmpty) return parts.join(', ');
-    return 'Jaipur, Rajasthan';
+    return _missingText;
   }
 
   String _dateLine() {
@@ -120,7 +121,7 @@ class ProfileHomePage extends StatelessWidget {
       'birth_date',
       'birthdate',
       'dateOfBirth',
-    ], fallback: '23 March 2016');
+    ], fallback: _missingText);
   }
 
   String _profession() {
@@ -131,31 +132,63 @@ class ProfileHomePage extends StatelessWidget {
       'designation',
       'class',
       'grade',
-    ], fallback: '3rd Grade');
+      'account_type',
+      'accountType',
+      'role',
+    ], fallback: _missingText);
   }
 
   String _aboutText() {
-    final direct = _stringValue([
-      'about_me',
-      'aboutMe',
-      'bio',
-      'description',
-      'intro',
-    ]);
+    final direct = bio?.trim().isNotEmpty == true
+        ? bio!.trim()
+        : _stringValue([
+            'about_me',
+            'aboutMe',
+            'bio',
+            'description',
+            'intro',
+          ], fallback: '');
     if (direct.isNotEmpty) return direct;
-    return 'Hi! I’m ${fullName?.trim().isNotEmpty == true ? fullName!.trim() : username.trim()}, a curious little creator who loves learning, exploring, and making every day feel a bit brighter.';
+    return _missingText;
   }
 
   List<String> _hobbies() {
     return _listValue(
       ['hobbies', 'interests', 'tags', 'favoriteThings'],
-      fallback: const ['Drawing', 'Reading', 'Dancing', 'Exploring'],
+      fallback: const [],
     );
   }
 
   int _likesFallback() {
     if (likesCount > 0) return likesCount;
-    return 512;
+    return 0;
+  }
+
+  bool _isFollowed() {
+    final source = profile;
+    if (source == null) return false;
+    final value = source['is_followed_by_me'] ??
+        source['isFollowing'] ??
+        source['is_following'] ??
+        source['followed_by_me'] ??
+        source['followed'];
+    if (value is bool) return value;
+    if (value == null) return false;
+    final text = value.toString().trim().toLowerCase();
+    return text == 'true' || text == '1' || text == 'yes' || text == 'followed';
+  }
+
+  String _profileSummary() {
+    final direct = _stringValue([
+      'tagline',
+      'headline',
+      'status',
+      'bio',
+      'about_me',
+      'aboutMe',
+    ], fallback: '');
+    if (direct.isNotEmpty) return direct;
+    return _missingText;
   }
 
   Widget _topIconButton({
@@ -447,25 +480,25 @@ class ProfileHomePage extends StatelessWidget {
     ];
 
     return Container(
-      padding: const EdgeInsets.all(1.4),
+      padding: const EdgeInsets.all(1.2),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(28),
         gradient: const LinearGradient(
           colors: <Color>[
-            Color(0xFFFFE4A0),
-            Color(0xFFBA8615),
-            Color(0xFFF5D57A),
-            Color(0xFF7D560C),
+            Color(0xFFF7D67A),
+            Color(0xFFB88414),
+            Color(0xFFFFE3A0),
+            Color(0xFF7A5310),
           ],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
-          stops: [0.0, 0.28, 0.70, 1.0],
+          stops: [0.0, 0.30, 0.68, 1.0],
         ),
         boxShadow: [
           BoxShadow(
-            color: _gold.withValues(alpha: 0.18),
-            blurRadius: 22,
-            spreadRadius: 0.5,
+            color: _gold.withValues(alpha: 0.14),
+            blurRadius: 18,
+            spreadRadius: 0.2,
           ),
         ],
       ),
@@ -478,9 +511,9 @@ class ProfileHomePage extends StatelessWidget {
                 decoration: BoxDecoration(
                   gradient: LinearGradient(
                     colors: [
-                      Color(0xFF24160A),
-                      Color(0xFF0E0D0B),
-                      Color(0xFF1A120A),
+                      Color(0xFF201309),
+                      Color(0xFF0C0C0C),
+                      Color(0xFF130F0B),
                     ],
                     begin: Alignment.topLeft,
                     end: Alignment.bottomRight,
@@ -489,33 +522,16 @@ class ProfileHomePage extends StatelessWidget {
               ),
             ),
             Positioned(
-              top: -56,
-              left: -32,
+              top: -46,
+              left: -28,
               child: Container(
-                width: 160,
-                height: 160,
+                width: 142,
+                height: 142,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
                   gradient: RadialGradient(
                     colors: [
-                      const Color(0xFFFFF1C7).withValues(alpha: 0.34),
-                      Colors.transparent,
-                    ],
-                  ),
-                ),
-              ),
-            ),
-            Positioned(
-              right: -28,
-              bottom: -28,
-              child: Container(
-                width: 136,
-                height: 136,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  gradient: RadialGradient(
-                    colors: [
-                      Colors.white.withValues(alpha: 0.08),
+                      const Color(0xFFFFF1C7).withValues(alpha: 0.26),
                       Colors.transparent,
                     ],
                   ),
@@ -540,7 +556,7 @@ class ProfileHomePage extends StatelessWidget {
               ),
             ),
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 16),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 18),
               child: Row(
                 children: [
                   for (var i = 0; i < statItems.length; i++) ...[
@@ -550,7 +566,7 @@ class ProfileHomePage extends StatelessWidget {
                     if (i != statItems.length - 1)
                       Container(
                         width: 1,
-                        height: 72,
+                        height: 68,
                         color: Colors.white.withValues(alpha: 0.10),
                       ),
                   ],
@@ -577,39 +593,53 @@ class ProfileHomePage extends StatelessWidget {
 
   Widget _stickyActions(BuildContext context) {
     if (isMe) return const SizedBox.shrink();
+    final isFollowed = _isFollowed();
     return SafeArea(
       top: false,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+        decoration: BoxDecoration(
+          color: Colors.black.withValues(alpha: 0.98),
+          border: Border(
+            top: BorderSide(color: Colors.white.withValues(alpha: 0.06)),
+          ),
+        ),
         child: Row(
           children: [
             Expanded(
               child: Container(
-                height: 58,
+                height: 52,
                 decoration: BoxDecoration(
                   gradient: const LinearGradient(
                     colors: [Color(0xFFF6C453), Color(0xFFE0A91F)],
                     begin: Alignment.topLeft,
                     end: Alignment.bottomRight,
                   ),
-                  borderRadius: BorderRadius.circular(18),
+                  borderRadius: BorderRadius.circular(16),
                 ),
                 child: Material(
                   color: Colors.transparent,
                   child: InkWell(
-                    borderRadius: BorderRadius.circular(18),
+                    borderRadius: BorderRadius.circular(16),
                     onTap: onFollow,
-                    child: const Center(
+                    child: Center(
                       child: Row(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          Icon(LucideIcons.userPlus, color: Colors.black),
-                          SizedBox(width: 10),
-                          Text(
-                            'Follow',
-                            style: TextStyle(
+                          if (!isFollowed) ...[
+                            const Icon(
+                              LucideIcons.userPlus,
                               color: Colors.black,
-                              fontSize: 18,
+                              size: 18,
+                            ),
+                            const SizedBox(width: 8),
+                          ],
+                          Text(
+                            isFollowed ? 'Followed' : 'Follow',
+                            style: TextStyle(
+                              color: isFollowed ? Colors.black : Colors.black,
+                              fontSize: 15,
                               fontWeight: FontWeight.w700,
                             ),
                           ),
@@ -620,31 +650,32 @@ class ProfileHomePage extends StatelessWidget {
                 ),
               ),
             ),
-            const SizedBox(width: 12),
+            const SizedBox(width: 10),
             Expanded(
               child: Container(
-                height: 58,
+                height: 52,
                 decoration: BoxDecoration(
                   color: Colors.transparent,
-                  borderRadius: BorderRadius.circular(18),
+                  borderRadius: BorderRadius.circular(16),
                   border: Border.all(color: _gold.withValues(alpha: 0.85)),
                 ),
                 child: Material(
                   color: Colors.transparent,
                   child: InkWell(
-                    borderRadius: BorderRadius.circular(18),
+                    borderRadius: BorderRadius.circular(16),
                     onTap: onMessage,
                     child: const Center(
                       child: Row(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          Icon(LucideIcons.messageCircle, color: _gold),
-                          SizedBox(width: 10),
+                          Icon(LucideIcons.messageCircle,
+                              color: _gold, size: 18),
+                          SizedBox(width: 8),
                           Text(
                             'Message',
                             style: TextStyle(
                               color: Colors.white,
-                              fontSize: 18,
+                              fontSize: 15,
                               fontWeight: FontWeight.w600,
                             ),
                           ),
@@ -655,24 +686,24 @@ class ProfileHomePage extends StatelessWidget {
                 ),
               ),
             ),
-            const SizedBox(width: 12),
+            const SizedBox(width: 10),
             Container(
-              width: 58,
-              height: 58,
+              width: 52,
+              height: 52,
               decoration: BoxDecoration(
                 color: Colors.white.withValues(alpha: 0.05),
-                borderRadius: BorderRadius.circular(18),
+                borderRadius: BorderRadius.circular(16),
                 border: Border.all(color: Colors.white.withValues(alpha: 0.06)),
               ),
               child: Material(
                 color: Colors.transparent,
                 child: InkWell(
-                  borderRadius: BorderRadius.circular(18),
+                  borderRadius: BorderRadius.circular(16),
                   onTap: onShare,
                   child: const Icon(
                     LucideIcons.send,
                     color: Colors.white,
-                    size: 22,
+                    size: 20,
                   ),
                 ),
               ),
@@ -694,7 +725,6 @@ class ProfileHomePage extends StatelessWidget {
     final displayName = fullName?.trim().isNotEmpty == true
         ? fullName!.trim()
         : username.trim();
-    const tagline = <String>['Dreamer', 'Learner', 'Little Explorer'];
     final hobbies = _hobbies();
     const showBadge = true;
 
@@ -807,34 +837,34 @@ class ProfileHomePage extends StatelessWidget {
                         Positioned(
                           left: 0,
                           right: 0,
-                          bottom: -12,
+                          bottom: 0,
                           child: Center(
                             child: Stack(
                               clipBehavior: Clip.none,
                               children: [
                                 Container(
-                                  padding: const EdgeInsets.all(4),
+                                  padding: const EdgeInsets.all(2),
                                   decoration: BoxDecoration(
                                     shape: BoxShape.circle,
                                     border: Border.all(
-                                      color: _goldSoft.withValues(alpha: 0.92),
-                                      width: 2.4,
+                                      color: _goldSoft.withValues(alpha: 0.96),
+                                      width: 2.2,
                                     ),
                                     boxShadow: [
                                       BoxShadow(
-                                        color: _gold.withValues(alpha: 0.28),
-                                        blurRadius: 20,
-                                        spreadRadius: 0.8,
+                                        color: _gold.withValues(alpha: 0.24),
+                                        blurRadius: 16,
+                                        spreadRadius: 0.4,
                                       ),
                                     ],
                                   ),
                                   child: CircleAvatar(
-                                    radius: 52,
+                                    radius: 53,
                                     backgroundColor: _panel,
                                     child: ClipOval(
                                       child: SizedBox(
-                                        width: 104,
-                                        height: 104,
+                                        width: 106,
+                                        height: 106,
                                         child: hasHero
                                             ? SafeNetworkImage(
                                                 url: heroUrl,
@@ -855,34 +885,13 @@ class ProfileHomePage extends StatelessWidget {
                                   ),
                                 ),
                                 if (showBadge)
-                                  Positioned(
-                                    right: 2,
-                                    bottom: 2,
-                                    child: Container(
-                                      width: 30,
-                                      height: 30,
-                                      decoration: BoxDecoration(
-                                        color: _gold,
-                                        borderRadius:
-                                            BorderRadius.circular(999),
-                                        border: Border.all(
-                                          color: Colors.black,
-                                          width: 2,
-                                        ),
-                                        boxShadow: [
-                                          BoxShadow(
-                                            color:
-                                                _gold.withValues(alpha: 0.42),
-                                            blurRadius: 14,
-                                            spreadRadius: 0.5,
-                                          ),
-                                        ],
-                                      ),
-                                      child: const Icon(
-                                        Icons.check_rounded,
-                                        color: Colors.black,
-                                        size: 16,
-                                      ),
+                                  const Positioned(
+                                    right: 4,
+                                    bottom: 4,
+                                    child: Icon(
+                                      Icons.verified_rounded,
+                                      color: _gold,
+                                      size: 22,
                                     ),
                                   ),
                               ],
@@ -926,7 +935,7 @@ class ProfileHomePage extends StatelessWidget {
                         ),
                         const SizedBox(height: 8),
                         Text(
-                          tagline.join('  •  '),
+                          _profileSummary(),
                           textAlign: TextAlign.center,
                           style: TextStyle(
                             color: Colors.white.withValues(alpha: 0.72),
@@ -1053,7 +1062,9 @@ class ProfileHomePage extends StatelessWidget {
                                         _profileInfoTile(
                                           icon: LucideIcons.heart,
                                           label: 'Hobbies',
-                                          value: hobbies.join(', '),
+                                          value: hobbies.isNotEmpty
+                                              ? hobbies.join(', ')
+                                              : _missingText,
                                           iconColor: const Color(0xFFF48FAF),
                                         ),
                                         const SizedBox(height: 18),
@@ -1062,7 +1073,7 @@ class ProfileHomePage extends StatelessWidget {
                                           label: 'Favorite Color',
                                           value: _stringValue(
                                             ['favorite_color', 'favoriteColor'],
-                                            fallback: 'Pink',
+                                            fallback: _missingText,
                                           ),
                                           iconColor: const Color(0xFFB68CFF),
                                         ),
@@ -1075,7 +1086,7 @@ class ProfileHomePage extends StatelessWidget {
                                               'favorite_subject',
                                               'favoriteSubject'
                                             ],
-                                            fallback: 'Art',
+                                            fallback: _missingText,
                                           ),
                                           iconColor: const Color(0xFFB68CFF),
                                         ),
@@ -1097,9 +1108,9 @@ class ProfileHomePage extends StatelessWidget {
                           spacing: 10,
                           runSpacing: 10,
                           children: [
-                            for (final hobby in hobbies.take(6))
+                            if (hobbies.isEmpty)
                               Chip(
-                                label: Text(hobby),
+                                label: const Text(_missingText),
                                 backgroundColor:
                                     Colors.white.withValues(alpha: 0.03),
                                 side: BorderSide(
@@ -1117,7 +1128,29 @@ class ProfileHomePage extends StatelessWidget {
                                 shape: RoundedRectangleBorder(
                                   borderRadius: BorderRadius.circular(999),
                                 ),
-                              ),
+                              )
+                            else
+                              for (final hobby in hobbies.take(6))
+                                Chip(
+                                  label: Text(hobby),
+                                  backgroundColor:
+                                      Colors.white.withValues(alpha: 0.03),
+                                  side: BorderSide(
+                                    color: Colors.white.withValues(alpha: 0.08),
+                                  ),
+                                  labelStyle: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 10,
+                                    vertical: 10,
+                                  ),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(999),
+                                  ),
+                                ),
                           ],
                         ),
                       ],
