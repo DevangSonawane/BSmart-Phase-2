@@ -297,6 +297,77 @@ class ProfileHomePage extends StatelessWidget {
     );
   }
 
+  Future<void> _showQuickActionsMenu(
+    BuildContext buttonContext,
+    List<String> hobbies,
+  ) async {
+    final buttonBox = buttonContext.findRenderObject() as RenderBox?;
+    final overlayBox =
+        Overlay.of(buttonContext).context.findRenderObject() as RenderBox?;
+    if (buttonBox == null || overlayBox == null) {
+      await _showQuickActionsSheet(buttonContext, hobbies);
+      return;
+    }
+
+    final position = RelativeRect.fromRect(
+      buttonBox.localToGlobal(Offset.zero, ancestor: overlayBox) &
+          buttonBox.size,
+      Offset.zero & overlayBox.size,
+    );
+
+    final action = await showMenu<String>(
+      context: buttonContext,
+      position: position,
+      color: const Color(0xFF111111),
+      elevation: 14,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(18),
+        side: BorderSide(color: Colors.white.withValues(alpha: 0.08)),
+      ),
+      items: const [
+        PopupMenuItem<String>(
+          value: 'settings',
+          child: Row(
+            children: [
+              Icon(Icons.settings_rounded, color: _gold, size: 18),
+              SizedBox(width: 10),
+              Text(
+                'Settings',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+        ),
+        PopupMenuItem<String>(
+          value: 'hobbies',
+          child: Row(
+            children: [
+              Icon(Icons.favorite_rounded, color: _goldSoft, size: 18),
+              SizedBox(width: 10),
+              Text(
+                'Hobbies',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+
+    if (!buttonContext.mounted || action == null) return;
+    if (action == 'settings') {
+      onMenu?.call();
+    } else if (action == 'hobbies') {
+      await _showHobbiesSheet(buttonContext, hobbies);
+    }
+  }
+
   Future<void> _showHobbiesSheet(
     BuildContext context,
     List<String> hobbies,
@@ -827,11 +898,15 @@ class ProfileHomePage extends StatelessWidget {
                         Positioned(
                           top: topInset + 14,
                           right: 16,
-                          child: _topIconButton(
-                            context: context,
-                            icon: Icons.more_horiz_rounded,
-                            onTap: () =>
-                                _showQuickActionsSheet(context, hobbies),
+                          child: Builder(
+                            builder: (buttonContext) => _topIconButton(
+                              context: buttonContext,
+                              icon: Icons.more_horiz_rounded,
+                              onTap: () => _showQuickActionsMenu(
+                                buttonContext,
+                                hobbies,
+                              ),
+                            ),
                           ),
                         ),
                         Positioned(
