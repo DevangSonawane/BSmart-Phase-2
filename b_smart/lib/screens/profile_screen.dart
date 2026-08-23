@@ -3364,6 +3364,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
           reels: reelsForGrid,
           tweets: tweetsForHome,
           onOpenStories: isMe ? _openStoriesFromProfile : null,
+          onCreatePromote: isMe
+              ? () => Navigator.of(context).pushNamed('/promote/create')
+              : null,
           onBack: () => Navigator.of(context)
               .pushNamedAndRemoveUntil('/home', (route) => false),
           onMenu: isMe

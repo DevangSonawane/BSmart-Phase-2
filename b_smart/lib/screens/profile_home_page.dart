@@ -37,6 +37,7 @@ class ProfileHomePage extends StatefulWidget {
   final List<FeedPost> reels;
   final List<FeedPost> tweets;
   final VoidCallback? onOpenStories;
+  final VoidCallback? onCreatePromote;
   final VoidCallback? onBack;
   final VoidCallback? onMenu;
   final VoidCallback? onFollow;
@@ -61,6 +62,7 @@ class ProfileHomePage extends StatefulWidget {
     required this.reels,
     required this.tweets,
     required this.onOpenStories,
+    this.onCreatePromote,
     required this.onBack,
     required this.onMenu,
     required this.onFollow,
@@ -99,6 +101,7 @@ class _ProfileHomePageState extends State<ProfileHomePage> {
   List<FeedPost> get reels => widget.reels;
   List<FeedPost> get tweets => widget.tweets;
   VoidCallback? get onOpenStories => widget.onOpenStories;
+  VoidCallback? get onCreatePromote => widget.onCreatePromote;
   VoidCallback? get onBack => widget.onBack;
   VoidCallback? get onMenu => widget.onMenu;
   VoidCallback? get onFollow => widget.onFollow;
@@ -744,18 +747,18 @@ class _ProfileHomePageState extends State<ProfileHomePage> {
       ),
       _ProfileTabData(
         tab: ProfileContentTab.reels,
-        label: 'Reels',
-        icon: Icons.movie_creation_outlined,
+        label: 'bSparks',
+        icon: LucideIcons.clapperboard,
       ),
       _ProfileTabData(
         tab: ProfileContentTab.tweets,
-        label: 'Tweets',
-        icon: Icons.chat_bubble_outline_rounded,
+        label: 'Buzz',
+        icon: LucideIcons.messageCircle,
       ),
       _ProfileTabData(
         tab: ProfileContentTab.stories,
-        label: 'Promote',
-        icon: Icons.campaign_rounded,
+        label: 'Campaigns',
+        icon: LucideIcons.sparkles,
       ),
     ];
 
@@ -878,7 +881,7 @@ class _ProfileHomePageState extends State<ProfileHomePage> {
       case ProfileContentTab.posts:
         return _buildPostsTab(context, posts);
       case ProfileContentTab.reels:
-        return _buildPostsTab(context, reels, emptyLabel: 'No reels yet');
+        return _buildPostsTab(context, reels, emptyLabel: 'No bSparks yet');
       case ProfileContentTab.tweets:
         return _buildTweetsTab(context);
       case ProfileContentTab.stories:
@@ -892,105 +895,26 @@ class _ProfileHomePageState extends State<ProfileHomePage> {
     String emptyLabel = 'No posts yet',
   }) {
     if (items.isEmpty) {
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          _mockContentGrid(
-            title: emptyLabel,
-            subtitle: 'Some cards will appear here once content is available.',
-            cards: const [
-              _MockContentCard(
-                count: '128',
-                topColor: Color(0xFF2C75FF),
-                bottomColor: Color(0xFF0D1C44),
-                icon: Icons.landscape_rounded,
-                countIcon: Icons.favorite_border_rounded,
-              ),
-              _MockContentCard(
-                count: '2.3K',
-                topColor: Color(0xFF7A2CFF),
-                bottomColor: Color(0xFF111027),
-                icon: Icons.movie_creation_outlined,
-                countIcon: Icons.play_arrow_rounded,
-              ),
-              _MockContentCard(
-                count: '312',
-                topColor: Color(0xFFF4B34E),
-                bottomColor: Color(0xFF38211D),
-                icon: Icons.portrait_rounded,
-                countIcon: Icons.favorite_border_rounded,
-              ),
-              _MockContentCard(
-                count: '1.1K',
-                topColor: Color(0xFFEF8C45),
-                bottomColor: Color(0xFF24150D),
-                icon: Icons.directions_car_filled_rounded,
-                countIcon: Icons.play_arrow_rounded,
-              ),
-              _MockContentCard(
-                count: '98',
-                topColor: Color(0xFF272D63),
-                bottomColor: Color(0xFF0A0D1E),
-                icon: Icons.brightness_3_rounded,
-                countIcon: Icons.favorite_border_rounded,
-              ),
-            ],
-          ),
-          const SizedBox(height: 18),
-          _buildPostsActionCards(),
-        ],
+      return _emptyContentState(
+        title: emptyLabel,
+        subtitle: 'Posts will appear here once they are available.',
+        icon: LucideIcons.grid2x2,
       );
     }
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        PostsGrid(
-          posts: items,
-          onTap: (post) {
-            Navigator.of(context).pushNamed('/post/${post.id}');
-          },
-        ),
-        const SizedBox(height: 18),
-        _buildPostsActionCards(),
-      ],
+    return PostsGrid(
+      posts: items,
+      onTap: (post) {
+        Navigator.of(context).pushNamed('/post/${post.id}');
+      },
     );
   }
 
   Widget _buildTweetsTab(BuildContext context) {
     if (tweets.isEmpty) {
-      return _mockContentGrid(
-        title: 'No tweets yet',
-        subtitle: 'Keep this section ready with sample cards.',
-        cards: const [
-          _MockContentCard(
-            count: 'A',
-            topColor: Color(0xFF7C3AED),
-            bottomColor: Color(0xFF24104D),
-            icon: Icons.chat_bubble_outline_rounded,
-            countIcon: Icons.favorite_border_rounded,
-          ),
-          _MockContentCard(
-            count: 'B',
-            topColor: Color(0xFF06B6D4),
-            bottomColor: Color(0xFF08334A),
-            icon: Icons.forum_outlined,
-            countIcon: Icons.play_arrow_rounded,
-          ),
-          _MockContentCard(
-            count: 'C',
-            topColor: Color(0xFF14B8A6),
-            bottomColor: Color(0xFF0C3B37),
-            icon: Icons.reply_rounded,
-            countIcon: Icons.favorite_border_rounded,
-          ),
-          _MockContentCard(
-            count: 'D',
-            topColor: Color(0xFFF97316),
-            bottomColor: Color(0xFF4A2108),
-            icon: Icons.format_align_left_rounded,
-            countIcon: Icons.play_arrow_rounded,
-          ),
-        ],
+      return _emptyContentState(
+        title: 'No Buzz yet',
+        subtitle: 'Buzz posts will appear here once they are available.',
+        icon: LucideIcons.messageCircle,
       );
     }
     return Column(
@@ -1012,166 +936,18 @@ class _ProfileHomePageState extends State<ProfileHomePage> {
 
   Widget _buildStoriesTab(BuildContext context) {
     if (onOpenStories == null) {
-      return _mockContentGrid(
-        title: 'No promote yet',
-        subtitle: 'A few placeholder cards keep the layout lively.',
-        cards: const [
-          _MockContentCard(
-            count: '98',
-            topColor: Color(0xFF8B5CF6),
-            bottomColor: Color(0xFF24114D),
-            icon: Icons.auto_awesome_rounded,
-            countIcon: Icons.favorite_border_rounded,
-          ),
-          _MockContentCard(
-            count: '45',
-            topColor: Color(0xFFEC4899),
-            bottomColor: Color(0xFF4D102C),
-            icon: Icons.movie_creation_outlined,
-            countIcon: Icons.play_arrow_rounded,
-          ),
-          _MockContentCard(
-            count: '12',
-            topColor: Color(0xFFF59E0B),
-            bottomColor: Color(0xFF4D2B08),
-            icon: Icons.wb_sunny_outlined,
-            countIcon: Icons.favorite_border_rounded,
-          ),
-          _MockContentCard(
-            count: '7',
-            topColor: Color(0xFF22C55E),
-            bottomColor: Color(0xFF0B3D24),
-            icon: Icons.bolt_rounded,
-            countIcon: Icons.play_arrow_rounded,
-          ),
-        ],
+      return _emptyContentState(
+        title: 'Campaigns',
+        subtitle: 'Campaign tools will appear here when available.',
+        icon: LucideIcons.sparkles,
       );
     }
     return _emptyContentState(
-      title: 'Promote is available',
-      subtitle: 'Tap below to open your promotion tools.',
-      icon: Icons.campaign_rounded,
-      actionLabel: 'Open Promote',
+      title: 'Campaigns',
+      subtitle: 'Tap below to open your campaign tools.',
+      icon: LucideIcons.sparkles,
+      actionLabel: 'Open Campaigns',
       onActionTap: onOpenStories,
-    );
-  }
-
-  Widget _mockContentGrid({
-    required String title,
-    required String subtitle,
-    required List<_MockContentCard> cards,
-  }) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          title,
-          style: const TextStyle(
-            color: Colors.white,
-            fontSize: 17,
-            fontWeight: FontWeight.w700,
-          ),
-        ),
-        const SizedBox(height: 6),
-        Text(
-          subtitle,
-          style: TextStyle(
-            color: Colors.white.withValues(alpha: 0.65),
-            fontSize: 13,
-          ),
-        ),
-        const SizedBox(height: 14),
-        SizedBox(
-          height: 220,
-          child: ListView.separated(
-            scrollDirection: Axis.horizontal,
-            clipBehavior: Clip.none,
-            physics: const BouncingScrollPhysics(),
-            itemCount: cards.length,
-            padding: const EdgeInsets.symmetric(horizontal: 2),
-            itemBuilder: (context, index) {
-              final card = cards[index];
-              return SizedBox(
-                width: 136,
-                child: _MockContentTile(card: card),
-              );
-            },
-            separatorBuilder: (context, index) => const SizedBox(width: 12),
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildPostsActionCards() {
-    const cards = <_PostsActionCardData>[
-      _PostsActionCardData(
-        title: 'Promote',
-        subtitle: 'Boost your content and grow faster',
-        buttonLabel: 'Create Promote',
-        icon: Icons.campaign_rounded,
-        iconColor: Color(0xFFF0D7FF),
-        iconBackground: LinearGradient(
-          colors: [Color(0xFF9B5CF6), Color(0xFF5C2EC5)],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-        cardBackground: LinearGradient(
-          colors: [Color(0xFF1A1230), Color(0xFF120D22)],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-        buttonBackground: Color(0xFF2C2148),
-        buttonForeground: Color(0xFFB07CFF),
-      ),
-      _PostsActionCardData(
-        title: 'Miles',
-        subtitle: 'Keep engaging, keep earning!',
-        buttonLabel: 'Lvl 8',
-        icon: Icons.monetization_on_rounded,
-        iconColor: Color(0xFFFFE7A8),
-        iconBackground: LinearGradient(
-          colors: [Color(0xFFFFC44D), Color(0xFFE29A17)],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-        cardBackground: LinearGradient(
-          colors: [Color(0xFF191614), Color(0xFF11100F)],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-        buttonBackground: Color(0xFF2B2412),
-        buttonForeground: Color(0xFFF0B63A),
-        showProgress: true,
-        progress: 0.62,
-      ),
-    ];
-
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final availableWidth = constraints.maxWidth;
-        final cardWidth = availableWidth >= 420 ? 170.0 : 156.0;
-        const gap = 12.0;
-        return SizedBox(
-          height: 226,
-          child: SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            physics: const BouncingScrollPhysics(),
-            clipBehavior: Clip.none,
-            child: Row(
-              children: [
-                for (var i = 0; i < cards.length; i++) ...[
-                  SizedBox(
-                    width: cardWidth,
-                    child: _PostsActionCard(data: cards[i]),
-                  ),
-                  if (i != cards.length - 1) const SizedBox(width: gap),
-                ],
-              ],
-            ),
-          ),
-        );
-      },
     );
   }
 
@@ -1230,66 +1006,6 @@ class _ProfileHomePageState extends State<ProfileHomePage> {
   }
 
   Widget _buildChatPreviewSection(BuildContext context) {
-    const contacts = <_ChatPreviewContact>[
-      _ChatPreviewContact(
-        name: 'Rohan',
-        initials: 'R',
-        color: Color(0xFF2F9E44),
-      ),
-      _ChatPreviewContact(
-        name: 'Neha',
-        initials: 'N',
-        color: Color(0xFFCA8A04),
-      ),
-      _ChatPreviewContact(
-        name: 'Aarav',
-        initials: 'A',
-        color: Color(0xFF7C3AED),
-      ),
-      _ChatPreviewContact(
-        name: 'Priya',
-        initials: 'P',
-        color: Color(0xFFDB2777),
-      ),
-      _ChatPreviewContact(
-        name: 'Karan',
-        initials: 'K',
-        color: Color(0xFF0EA5E9),
-      ),
-      _ChatPreviewContact(
-        name: 'Sana',
-        initials: 'S',
-        color: Color(0xFF22C55E),
-      ),
-      _ChatPreviewContact(
-        name: 'Vikram',
-        initials: 'V',
-        color: Color(0xFFF97316),
-      ),
-      _ChatPreviewContact(
-        name: 'Anya',
-        initials: 'A',
-        color: Color(0xFF8B5CF6),
-      ),
-      _ChatPreviewContact(
-        name: 'Ishaan',
-        initials: 'I',
-        color: Color(0xFF14B8A6),
-      ),
-      _ChatPreviewContact(
-        name: 'Meera',
-        initials: 'M',
-        color: Color(0xFFDB2777),
-      ),
-      _ChatPreviewContact(
-        name: 'Arjun',
-        initials: 'J',
-        color: Color(0xFF64748B),
-      ),
-    ];
-    final visibleContacts = contacts.take(4).toList();
-    final remainingCount = contacts.length - visibleContacts.length;
-
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
@@ -1364,31 +1080,43 @@ class _ProfileHomePageState extends State<ProfileHomePage> {
             ],
           ),
           const SizedBox(height: 10),
-          SizedBox(
-            height: 78,
-            child: ListView.separated(
-              scrollDirection: Axis.horizontal,
-              clipBehavior: Clip.none,
-              physics: const BouncingScrollPhysics(),
-              itemCount: visibleContacts.length + 1,
-              separatorBuilder: (_, __) => const SizedBox(width: 10),
-              itemBuilder: (context, index) {
-                if (index == visibleContacts.length) {
-                  return _ChatPreviewBubble(
-                    name: '+$remainingCount',
-                    initials: '+$remainingCount',
-                    color: const Color(0xFF1B1F27),
-                    showName: false,
-                  );
-                }
-                final contact = visibleContacts[index];
-                return _ChatPreviewBubble(
-                  name: contact.name,
-                  initials: contact.initials,
-                  color: contact.color,
-                  online: true,
-                );
-              },
+          Text(
+            'Open your chat inbox to continue conversations.',
+            style: TextStyle(
+              color: Colors.white.withValues(alpha: 0.72),
+              fontSize: 12.5,
+              height: 1.35,
+            ),
+          ),
+          const SizedBox(height: 12),
+          Material(
+            color: Colors.white.withValues(alpha: 0.04),
+            borderRadius: BorderRadius.circular(16),
+            child: InkWell(
+              borderRadius: BorderRadius.circular(16),
+              onTap: () => _openMessagingPage(context),
+              child: const Padding(
+                padding: EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                child: Row(
+                  children: [
+                    Icon(LucideIcons.messageCircle,
+                        color: Color(0xFF8CFF6E), size: 16),
+                    SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        'Open Messages',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 13.5,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                    Icon(Icons.chevron_right_rounded,
+                        color: Colors.white70, size: 18),
+                  ],
+                ),
+              ),
             ),
           ),
         ],
@@ -2074,392 +1802,6 @@ class _StatTile extends StatelessWidget {
           ),
         ),
       ],
-    );
-  }
-}
-
-class _MockContentCard {
-  final String count;
-  final Color topColor;
-  final Color bottomColor;
-  final IconData icon;
-  final IconData countIcon;
-
-  const _MockContentCard({
-    required this.count,
-    required this.topColor,
-    required this.bottomColor,
-    required this.icon,
-    required this.countIcon,
-  });
-}
-
-class _ChatPreviewContact {
-  final String name;
-  final String initials;
-  final Color color;
-
-  const _ChatPreviewContact({
-    required this.name,
-    required this.initials,
-    required this.color,
-  });
-}
-
-class _ChatPreviewBubble extends StatelessWidget {
-  final String name;
-  final String initials;
-  final Color color;
-  final bool online;
-  final bool showName;
-
-  const _ChatPreviewBubble({
-    required this.name,
-    required this.initials,
-    required this.color,
-    this.online = false,
-    this.showName = true,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      width: 50,
-      child: Column(
-        children: [
-          Stack(
-            clipBehavior: Clip.none,
-            children: [
-              Container(
-                width: 42,
-                height: 42,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  gradient: LinearGradient(
-                    colors: [
-                      color.withValues(alpha: 0.95),
-                      color.withValues(alpha: 0.68),
-                    ],
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                  ),
-                  border: Border.all(
-                    color: Colors.white.withValues(alpha: 0.08),
-                  ),
-                ),
-                alignment: Alignment.center,
-                child: Text(
-                  showName ? initials : name,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 14,
-                    fontWeight: FontWeight.w700,
-                    height: 1.0,
-                  ),
-                ),
-              ),
-              if (online)
-                Positioned(
-                  right: 2,
-                  bottom: 2,
-                  child: Container(
-                    width: 8,
-                    height: 8,
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF4CAF50),
-                      shape: BoxShape.circle,
-                      border: Border.all(color: Colors.black, width: 1.1),
-                    ),
-                  ),
-                ),
-            ],
-          ),
-          const SizedBox(height: 5),
-          if (showName)
-            Text(
-              name,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                color: Colors.white.withValues(alpha: 0.82),
-                fontSize: 10.5,
-                fontWeight: FontWeight.w500,
-              ),
-            )
-          else
-            const SizedBox(height: 0),
-        ],
-      ),
-    );
-  }
-}
-
-class _PostsActionCardData {
-  final String title;
-  final String subtitle;
-  final String buttonLabel;
-  final IconData icon;
-  final Color iconColor;
-  final Gradient iconBackground;
-  final Gradient cardBackground;
-  final Color buttonBackground;
-  final Color buttonForeground;
-  final bool showProgress;
-  final double progress;
-
-  const _PostsActionCardData({
-    required this.title,
-    required this.subtitle,
-    required this.buttonLabel,
-    required this.icon,
-    required this.iconColor,
-    required this.iconBackground,
-    required this.cardBackground,
-    required this.buttonBackground,
-    required this.buttonForeground,
-    this.showProgress = false,
-    this.progress = 0.0,
-  });
-}
-
-class _PostsActionCard extends StatelessWidget {
-  final _PostsActionCardData data;
-
-  const _PostsActionCard({required this.data});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      height: 218,
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(24),
-        gradient: data.cardBackground,
-        border: Border.all(color: Colors.white.withValues(alpha: 0.075)),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.28),
-            blurRadius: 18,
-            offset: const Offset(0, 10),
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Expanded(
-                child: Text(
-                  data.title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 14,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ),
-              const Icon(
-                Icons.chevron_right_rounded,
-                color: Colors.white70,
-                size: 17,
-              ),
-            ],
-          ),
-          const SizedBox(height: 16),
-          Container(
-            width: 52,
-            height: 52,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              gradient: data.iconBackground,
-              boxShadow: [
-                BoxShadow(
-                  color: data.iconColor.withValues(alpha: 0.24),
-                  blurRadius: 18,
-                  offset: const Offset(0, 8),
-                ),
-              ],
-            ),
-            child: Icon(data.icon, color: data.iconColor, size: 26),
-          ),
-          const SizedBox(height: 16),
-          Text(
-            data.subtitle,
-            maxLines: 3,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-              color: Colors.white.withValues(alpha: 0.78),
-              fontSize: 12.2,
-              height: 1.3,
-            ),
-          ),
-          const Spacer(),
-          if (data.showProgress) ...[
-            ClipRRect(
-              borderRadius: BorderRadius.circular(999),
-              child: Container(
-                height: 5,
-                color: Colors.white.withValues(alpha: 0.08),
-                child: Align(
-                  alignment: Alignment.centerLeft,
-                  child: FractionallySizedBox(
-                    widthFactor: data.progress.clamp(0.0, 1.0),
-                    child: Container(
-                      decoration: const BoxDecoration(
-                        gradient: LinearGradient(
-                          colors: [Color(0xFFF7C14A), Color(0xFFEEA827)],
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ),
-            const SizedBox(height: 8),
-          ],
-          Align(
-            alignment: Alignment.centerLeft,
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
-              decoration: BoxDecoration(
-                color: data.buttonBackground,
-                borderRadius: BorderRadius.circular(999),
-                border: Border.all(color: Colors.white.withValues(alpha: 0.04)),
-              ),
-              child: Text(
-                data.buttonLabel,
-                style: TextStyle(
-                  color: data.buttonForeground,
-                  fontSize: 12.2,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _MockContentTile extends StatelessWidget {
-  final _MockContentCard card;
-
-  const _MockContentTile({required this.card});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(24),
-        gradient: LinearGradient(
-          colors: [card.topColor, card.bottomColor],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: card.topColor.withValues(alpha: 0.22),
-            blurRadius: 18,
-            offset: const Offset(0, 10),
-          ),
-        ],
-      ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(24),
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            Positioned(
-              top: -18,
-              right: -12,
-              child: Container(
-                width: 104,
-                height: 104,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: Colors.white.withValues(alpha: 0.08),
-                ),
-              ),
-            ),
-            Positioned(
-              bottom: -22,
-              left: -10,
-              child: Container(
-                width: 96,
-                height: 96,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: Colors.black.withValues(alpha: 0.20),
-                ),
-              ),
-            ),
-            const Positioned.fill(
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    colors: [
-                      Color(0x00000000),
-                      Color(0x22000000),
-                      Color(0x99000000),
-                    ],
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
-                  ),
-                ),
-              ),
-            ),
-            Positioned(
-              top: 12,
-              left: 12,
-              child: Container(
-                width: 28,
-                height: 28,
-                decoration: BoxDecoration(
-                  color: Colors.black.withValues(alpha: 0.22),
-                  borderRadius: BorderRadius.circular(10),
-                  border: Border.all(
-                    color: Colors.white.withValues(alpha: 0.10),
-                  ),
-                ),
-                child: Icon(
-                  card.icon,
-                  color: Colors.white.withValues(alpha: 0.95),
-                  size: 14,
-                ),
-              ),
-            ),
-            Positioned(
-              left: 12,
-              bottom: 12,
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(
-                    card.countIcon,
-                    color: Colors.white.withValues(alpha: 0.94),
-                    size: 15,
-                  ),
-                  const SizedBox(width: 6),
-                  Text(
-                    card.count,
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 15,
-                      fontWeight: FontWeight.w700,
-                      height: 1.0,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
     );
   }
 }

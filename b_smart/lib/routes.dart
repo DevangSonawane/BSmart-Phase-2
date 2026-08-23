@@ -5,6 +5,7 @@ import 'screens/auth/forgot_password_screen.dart';
 import 'screens/auth/verify_otp_screen.dart';
 import 'screens/home_dashboard.dart';
 import 'screens/create_upload_screen.dart';
+import 'screens/promote_composer_screen.dart';
 import 'screens/reels_screen.dart';
 import 'screens/ads_page_screen.dart';
 import 'screens/promote_screen.dart';
@@ -94,6 +95,7 @@ final Map<String, WidgetBuilder> appRoutes = {
     final reelId = args is Map ? args['reelId']?.toString() : null;
     return PromoteScreen(initialReelId: reelId);
   },
+  '/promote/create': (ctx) => const PromoteComposerScreen(),
   '/settings': (ctx) => const SettingsScreen(),
   '/wallet': (ctx) => const WalletScreen(),
   '/wallet/redeem-gift-cards': (ctx) => const RedeemGiftCardsScreen(),
