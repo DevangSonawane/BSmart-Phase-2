@@ -6,6 +6,7 @@ import '../utils/url_helper.dart';
 import '../widgets/post_card.dart';
 import '../widgets/posts_grid.dart';
 import '../widgets/safe_network_image.dart';
+import 'messaging_screen.dart';
 
 enum ProfileHomeSection {
   overview,
@@ -243,6 +244,12 @@ class _ProfileHomePageState extends State<ProfileHomePage> {
 
   void _showOverviewSection() {
     setState(() => _section = ProfileHomeSection.overview);
+  }
+
+  void _openMessagingPage(BuildContext context) {
+    Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => const MessagingScreen()),
+    );
   }
 
   void _selectContentTab(ProfileContentTab tab) {
@@ -1222,6 +1229,173 @@ class _ProfileHomePageState extends State<ProfileHomePage> {
     );
   }
 
+  Widget _buildChatPreviewSection(BuildContext context) {
+    const contacts = <_ChatPreviewContact>[
+      _ChatPreviewContact(
+        name: 'Rohan',
+        initials: 'R',
+        color: Color(0xFF2F9E44),
+      ),
+      _ChatPreviewContact(
+        name: 'Neha',
+        initials: 'N',
+        color: Color(0xFFCA8A04),
+      ),
+      _ChatPreviewContact(
+        name: 'Aarav',
+        initials: 'A',
+        color: Color(0xFF7C3AED),
+      ),
+      _ChatPreviewContact(
+        name: 'Priya',
+        initials: 'P',
+        color: Color(0xFFDB2777),
+      ),
+      _ChatPreviewContact(
+        name: 'Karan',
+        initials: 'K',
+        color: Color(0xFF0EA5E9),
+      ),
+      _ChatPreviewContact(
+        name: 'Sana',
+        initials: 'S',
+        color: Color(0xFF22C55E),
+      ),
+      _ChatPreviewContact(
+        name: 'Vikram',
+        initials: 'V',
+        color: Color(0xFFF97316),
+      ),
+      _ChatPreviewContact(
+        name: 'Anya',
+        initials: 'A',
+        color: Color(0xFF8B5CF6),
+      ),
+      _ChatPreviewContact(
+        name: 'Ishaan',
+        initials: 'I',
+        color: Color(0xFF14B8A6),
+      ),
+      _ChatPreviewContact(
+        name: 'Meera',
+        initials: 'M',
+        color: Color(0xFFDB2777),
+      ),
+      _ChatPreviewContact(
+        name: 'Arjun',
+        initials: 'J',
+        color: Color(0xFF64748B),
+      ),
+    ];
+    final visibleContacts = contacts.take(4).toList();
+    final remainingCount = contacts.length - visibleContacts.length;
+
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          colors: [
+            Color(0xFF111418),
+            Color(0xFF0B0E12),
+          ],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.06)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.28),
+            blurRadius: 20,
+            offset: const Offset(0, 10),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 30,
+                height: 30,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  gradient: LinearGradient(
+                    colors: [
+                      const Color(0xFF7CFF6B).withValues(alpha: 0.22),
+                      const Color(0xFF7CFF6B).withValues(alpha: 0.06),
+                    ],
+                  ),
+                ),
+                child: const Icon(
+                  LucideIcons.messageCircle,
+                  color: Color(0xFF8CFF6E),
+                  size: 16,
+                ),
+              ),
+              const SizedBox(width: 8),
+              const Expanded(
+                child: Text(
+                  'Chat',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 17,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+              Material(
+                color: Colors.white.withValues(alpha: 0.04),
+                borderRadius: BorderRadius.circular(999),
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(999),
+                  onTap: () => _openMessagingPage(context),
+                  child: const Padding(
+                    padding: EdgeInsets.all(7),
+                    child: Icon(
+                      Icons.chevron_right_rounded,
+                      color: Colors.white70,
+                      size: 18,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          SizedBox(
+            height: 78,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              clipBehavior: Clip.none,
+              physics: const BouncingScrollPhysics(),
+              itemCount: visibleContacts.length + 1,
+              separatorBuilder: (_, __) => const SizedBox(width: 10),
+              itemBuilder: (context, index) {
+                if (index == visibleContacts.length) {
+                  return _ChatPreviewBubble(
+                    name: '+$remainingCount',
+                    initials: '+$remainingCount',
+                    color: const Color(0xFF1B1F27),
+                    showName: false,
+                  );
+                }
+                final contact = visibleContacts[index];
+                return _ChatPreviewBubble(
+                  name: contact.name,
+                  initials: contact.initials,
+                  color: contact.color,
+                  online: true,
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   String _formatCompact(int value) {
     if (value >= 1000000) {
       final n = value / 1000000;
@@ -1814,6 +1988,8 @@ class _ProfileHomePageState extends State<ProfileHomePage> {
                                   ),
                             ],
                           ),
+                          const SizedBox(height: 24),
+                          _buildChatPreviewSection(context),
                         ],
                       ],
                     ),
@@ -1916,6 +2092,107 @@ class _MockContentCard {
     required this.icon,
     required this.countIcon,
   });
+}
+
+class _ChatPreviewContact {
+  final String name;
+  final String initials;
+  final Color color;
+
+  const _ChatPreviewContact({
+    required this.name,
+    required this.initials,
+    required this.color,
+  });
+}
+
+class _ChatPreviewBubble extends StatelessWidget {
+  final String name;
+  final String initials;
+  final Color color;
+  final bool online;
+  final bool showName;
+
+  const _ChatPreviewBubble({
+    required this.name,
+    required this.initials,
+    required this.color,
+    this.online = false,
+    this.showName = true,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: 50,
+      child: Column(
+        children: [
+          Stack(
+            clipBehavior: Clip.none,
+            children: [
+              Container(
+                width: 42,
+                height: 42,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  gradient: LinearGradient(
+                    colors: [
+                      color.withValues(alpha: 0.95),
+                      color.withValues(alpha: 0.68),
+                    ],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                  ),
+                  border: Border.all(
+                    color: Colors.white.withValues(alpha: 0.08),
+                  ),
+                ),
+                alignment: Alignment.center,
+                child: Text(
+                  showName ? initials : name,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700,
+                    height: 1.0,
+                  ),
+                ),
+              ),
+              if (online)
+                Positioned(
+                  right: 2,
+                  bottom: 2,
+                  child: Container(
+                    width: 8,
+                    height: 8,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF4CAF50),
+                      shape: BoxShape.circle,
+                      border: Border.all(color: Colors.black, width: 1.1),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: 5),
+          if (showName)
+            Text(
+              name,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: Colors.white.withValues(alpha: 0.82),
+                fontSize: 10.5,
+                fontWeight: FontWeight.w500,
+              ),
+            )
+          else
+            const SizedBox(height: 0),
+        ],
+      ),
+    );
+  }
 }
 
 class _PostsActionCardData {
