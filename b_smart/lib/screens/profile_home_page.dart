@@ -1,10 +1,25 @@
 import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
+import '../models/feed_post_model.dart';
 import '../utils/url_helper.dart';
+import '../widgets/post_card.dart';
+import '../widgets/posts_grid.dart';
 import '../widgets/safe_network_image.dart';
 
-class ProfileHomePage extends StatelessWidget {
+enum ProfileHomeSection {
+  overview,
+  content,
+}
+
+enum ProfileContentTab {
+  posts,
+  reels,
+  tweets,
+  stories,
+}
+
+class ProfileHomePage extends StatefulWidget {
   final Map<String, dynamic>? profile;
   final String username;
   final String? fullName;
@@ -17,6 +32,10 @@ class ProfileHomePage extends StatelessWidget {
   final int likesCount;
   final bool isMe;
   final bool isValidated;
+  final List<FeedPost> posts;
+  final List<FeedPost> reels;
+  final List<FeedPost> tweets;
+  final VoidCallback? onOpenStories;
   final VoidCallback? onBack;
   final VoidCallback? onMenu;
   final VoidCallback? onFollow;
@@ -37,6 +56,10 @@ class ProfileHomePage extends StatelessWidget {
     required this.likesCount,
     required this.isMe,
     required this.isValidated,
+    required this.posts,
+    required this.reels,
+    required this.tweets,
+    required this.onOpenStories,
     required this.onBack,
     required this.onMenu,
     required this.onFollow,
@@ -44,10 +67,42 @@ class ProfileHomePage extends StatelessWidget {
     required this.onShare,
   });
 
+  static const Color _goldSoft = Color(0xFFFFD77A);
+
+  @override
+  State<ProfileHomePage> createState() => _ProfileHomePageState();
+}
+
+class _ProfileHomePageState extends State<ProfileHomePage> {
+  ProfileHomeSection _section = ProfileHomeSection.overview;
+  ProfileContentTab _contentTab = ProfileContentTab.posts;
+
   static const Color _gold = Color(0xFFD4AF37);
   static const Color _goldSoft = Color(0xFFFFD77A);
   static const Color _panel = Color(0xFF101010);
   static const String _missingText = 'Null';
+
+  Map<String, dynamic>? get profile => widget.profile;
+  String get username => widget.username;
+  String? get fullName => widget.fullName;
+  String? get bio => widget.bio;
+  String? get avatarUrl => widget.avatarUrl;
+  Map<String, String>? get avatarHeaders => widget.avatarHeaders;
+  int get postsCount => widget.postsCount;
+  int get followers => widget.followers;
+  int get following => widget.following;
+  int get likesCount => widget.likesCount;
+  bool get isMe => widget.isMe;
+  bool get isValidated => widget.isValidated;
+  List<FeedPost> get posts => widget.posts;
+  List<FeedPost> get reels => widget.reels;
+  List<FeedPost> get tweets => widget.tweets;
+  VoidCallback? get onOpenStories => widget.onOpenStories;
+  VoidCallback? get onBack => widget.onBack;
+  VoidCallback? get onMenu => widget.onMenu;
+  VoidCallback? get onFollow => widget.onFollow;
+  VoidCallback? get onMessage => widget.onMessage;
+  VoidCallback? get onShare => widget.onShare;
 
   String _stringValue(List<String> keys, {String fallback = ''}) {
     final source = profile;
@@ -176,6 +231,19 @@ class ProfileHomePage extends StatelessWidget {
     if (value == null) return false;
     final text = value.toString().trim().toLowerCase();
     return text == 'true' || text == '1' || text == 'yes' || text == 'followed';
+  }
+
+  void _openContentSection() {
+    if (!isMe) return;
+    setState(() {
+      _section = ProfileHomeSection.content;
+      _contentTab = ProfileContentTab.posts;
+    });
+  }
+
+  void _selectContentTab(ProfileContentTab tab) {
+    if (_contentTab == tab) return;
+    setState(() => _contentTab = tab);
   }
 
   String _profileSummary() {
@@ -607,7 +675,19 @@ class ProfileHomePage extends StatelessWidget {
                 children: [
                   for (var i = 0; i < statItems.length; i++) ...[
                     Expanded(
-                      child: _StatTile(item: statItems[i]),
+                      child: i == 0 && isMe
+                          ? Material(
+                              color: Colors.transparent,
+                              borderRadius: BorderRadius.circular(18),
+                              child: InkWell(
+                                borderRadius: BorderRadius.circular(18),
+                                onTap: _openContentSection,
+                                child: _StatTile(
+                                  item: statItems[i],
+                                ),
+                              ),
+                            )
+                          : _StatTile(item: statItems[i]),
                     ),
                     if (i != statItems.length - 1)
                       Container(
@@ -621,6 +701,406 @@ class ProfileHomePage extends StatelessWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _buildContentSection(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _buildContentTabs(),
+        const SizedBox(height: 6),
+        AnimatedSwitcher(
+          duration: const Duration(milliseconds: 220),
+          switchInCurve: Curves.easeOutCubic,
+          switchOutCurve: Curves.easeInCubic,
+          child: KeyedSubtree(
+            key: ValueKey(_contentTab),
+            child: _buildContentTabBody(context),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildContentTabs() {
+    const tabs = <_ProfileTabData>[
+      _ProfileTabData(
+        tab: ProfileContentTab.posts,
+        label: 'Posts',
+      ),
+      _ProfileTabData(
+        tab: ProfileContentTab.reels,
+        label: 'Reels',
+      ),
+      _ProfileTabData(
+        tab: ProfileContentTab.tweets,
+        label: 'Tweets',
+      ),
+      _ProfileTabData(
+        tab: ProfileContentTab.stories,
+        label: 'Stories',
+      ),
+    ];
+
+    const activeColor = Color(0xFFB07CFF);
+    const inactiveColor = Color(0xFFB9A9D4);
+    final activeIndex = _contentTabIndex;
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final tabWidth = constraints.maxWidth / tabs.length;
+        return SizedBox(
+          height: 38,
+          child: Stack(
+            children: [
+              Row(
+                children: [
+                  for (var i = 0; i < tabs.length; i++)
+                    Expanded(
+                      child: _contentTabButton(
+                        tabs[i],
+                        active: _contentTab == tabs[i].tab,
+                        activeColor: activeColor,
+                        inactiveColor: inactiveColor,
+                        onTap: () => _selectContentTab(tabs[i].tab),
+                      ),
+                    ),
+                ],
+              ),
+              Positioned(
+                left: 0,
+                right: 0,
+                bottom: 0,
+                child: Container(
+                  height: 1,
+                  color: Colors.white.withValues(alpha: 0.08),
+                ),
+              ),
+              AnimatedPositioned(
+                duration: const Duration(milliseconds: 220),
+                curve: Curves.easeOutCubic,
+                left: activeIndex * tabWidth + 20,
+                bottom: 0,
+                width: tabWidth - 40,
+                child: Container(
+                  height: 2,
+                  decoration: BoxDecoration(
+                    color: activeColor,
+                    borderRadius: BorderRadius.circular(999),
+                    boxShadow: [
+                      BoxShadow(
+                        color: activeColor.withValues(alpha: 0.35),
+                        blurRadius: 10,
+                        spreadRadius: 0.5,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _contentTabButton(
+    _ProfileTabData tab, {
+    required bool active,
+    required Color activeColor,
+    required Color inactiveColor,
+    required VoidCallback onTap,
+  }) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(12),
+      onTap: onTap,
+      child: Center(
+        child: Text(
+          tab.label,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(
+            color: active ? activeColor : inactiveColor.withValues(alpha: 0.8),
+            fontSize: 11.5,
+            fontWeight: FontWeight.w600,
+            letterSpacing: 0.15,
+          ),
+        ),
+      ),
+    );
+  }
+
+  int get _contentTabIndex {
+    switch (_contentTab) {
+      case ProfileContentTab.posts:
+        return 0;
+      case ProfileContentTab.reels:
+        return 1;
+      case ProfileContentTab.tweets:
+        return 2;
+      case ProfileContentTab.stories:
+        return 3;
+    }
+  }
+
+  Widget _buildContentTabBody(BuildContext context) {
+    switch (_contentTab) {
+      case ProfileContentTab.posts:
+        return _buildPostsTab(context, posts);
+      case ProfileContentTab.reels:
+        return _buildPostsTab(context, reels, emptyLabel: 'No reels yet');
+      case ProfileContentTab.tweets:
+        return _buildTweetsTab(context);
+      case ProfileContentTab.stories:
+        return _buildStoriesTab(context);
+    }
+  }
+
+  Widget _buildPostsTab(
+    BuildContext context,
+    List<FeedPost> items, {
+    String emptyLabel = 'No posts yet',
+  }) {
+    if (items.isEmpty) {
+      return _mockContentGrid(
+        title: emptyLabel,
+        subtitle: 'Some cards will appear here once content is available.',
+        cards: const [
+          _MockContentCard(
+            title: '128',
+            label: 'Posts',
+            topColor: Color(0xFF6D28D9),
+            bottomColor: Color(0xFF1B1036),
+            icon: LucideIcons.grid2x2,
+          ),
+          _MockContentCard(
+            title: '2.3K',
+            label: 'Reels',
+            topColor: Color(0xFF9333EA),
+            bottomColor: Color(0xFF180F2C),
+            icon: LucideIcons.clapperboard,
+          ),
+          _MockContentCard(
+            title: '312',
+            label: 'Stories',
+            topColor: Color(0xFFDB2777),
+            bottomColor: Color(0xFF2C1020),
+            icon: LucideIcons.refreshCcw,
+          ),
+          _MockContentCard(
+            title: '1.1K',
+            label: 'Saved',
+            topColor: Color(0xFFF59E0B),
+            bottomColor: Color(0xFF2B1A08),
+            icon: LucideIcons.bookMarked,
+          ),
+        ],
+      );
+    }
+    return PostsGrid(
+      posts: items,
+      onTap: (post) {
+        Navigator.of(context).pushNamed('/post/${post.id}');
+      },
+    );
+  }
+
+  Widget _buildTweetsTab(BuildContext context) {
+    if (tweets.isEmpty) {
+      return _mockContentGrid(
+        title: 'No tweets yet',
+        subtitle: 'Keep this section ready with sample cards.',
+        cards: const [
+          _MockContentCard(
+            title: 'A',
+            label: 'Tweet',
+            topColor: Color(0xFF7C3AED),
+            bottomColor: Color(0xFF24104D),
+            icon: LucideIcons.messageSquare,
+          ),
+          _MockContentCard(
+            title: 'B',
+            label: 'Buzz',
+            topColor: Color(0xFF06B6D4),
+            bottomColor: Color(0xFF08334A),
+            icon: LucideIcons.messageCircle,
+          ),
+          _MockContentCard(
+            title: 'C',
+            label: 'Reply',
+            topColor: Color(0xFF14B8A6),
+            bottomColor: Color(0xFF0C3B37),
+            icon: LucideIcons.reply,
+          ),
+          _MockContentCard(
+            title: 'D',
+            label: 'Thread',
+            topColor: Color(0xFFF97316),
+            bottomColor: Color(0xFF4A2108),
+            icon: Icons.format_align_left_rounded,
+          ),
+        ],
+      );
+    }
+    return Column(
+      children: [
+        for (final tweet in tweets)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 12),
+            child: PostCard(
+              post: tweet,
+              isOwnPost: isMe,
+              onComment: () => Navigator.of(context)
+                  .pushNamed('/post/${tweet.id}?type=tweet'),
+              onUserTap: () {},
+            ),
+          ),
+      ],
+    );
+  }
+
+  Widget _buildStoriesTab(BuildContext context) {
+    if (onOpenStories == null) {
+      return _mockContentGrid(
+        title: 'No stories yet',
+        subtitle: 'A few placeholder cards keep the layout lively.',
+        cards: const [
+          _MockContentCard(
+            title: '98',
+            label: 'Story',
+            topColor: Color(0xFF8B5CF6),
+            bottomColor: Color(0xFF24114D),
+            icon: LucideIcons.refreshCcw,
+          ),
+          _MockContentCard(
+            title: '45',
+            label: 'Clip',
+            topColor: Color(0xFFEC4899),
+            bottomColor: Color(0xFF4D102C),
+            icon: LucideIcons.clapperboard,
+          ),
+          _MockContentCard(
+            title: '12',
+            label: 'Day',
+            topColor: Color(0xFFF59E0B),
+            bottomColor: Color(0xFF4D2B08),
+            icon: LucideIcons.sunMedium,
+          ),
+          _MockContentCard(
+            title: '7',
+            label: 'Live',
+            topColor: Color(0xFF22C55E),
+            bottomColor: Color(0xFF0B3D24),
+            icon: LucideIcons.bolt,
+          ),
+        ],
+      );
+    }
+    return _emptyContentState(
+      title: 'Stories are available',
+      subtitle: 'Tap below to open your story viewer.',
+      icon: LucideIcons.refreshCcw,
+      actionLabel: 'Open Stories',
+      onActionTap: onOpenStories,
+    );
+  }
+
+  Widget _mockContentGrid({
+    required String title,
+    required String subtitle,
+    required List<_MockContentCard> cards,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          title,
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 17,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        const SizedBox(height: 6),
+        Text(
+          subtitle,
+          style: TextStyle(
+            color: Colors.white.withValues(alpha: 0.65),
+            fontSize: 13,
+          ),
+        ),
+        const SizedBox(height: 14),
+        GridView.builder(
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          itemCount: cards.length,
+          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: 2,
+            crossAxisSpacing: 12,
+            mainAxisSpacing: 12,
+            childAspectRatio: 0.86,
+          ),
+          itemBuilder: (context, index) {
+            final card = cards[index];
+            return _MockContentTile(card: card);
+          },
+        ),
+      ],
+    );
+  }
+
+  Widget _emptyContentState({
+    required String title,
+    required String subtitle,
+    required IconData icon,
+    String? actionLabel,
+    VoidCallback? onActionTap,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 24),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            icon,
+            size: 44,
+            color: Colors.white.withValues(alpha: 0.45),
+          ),
+          const SizedBox(height: 12),
+          Text(
+            title,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 17,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            subtitle,
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: Colors.white.withValues(alpha: 0.65),
+              fontSize: 13,
+            ),
+          ),
+          if (actionLabel != null && onActionTap != null) ...[
+            const SizedBox(height: 14),
+            ElevatedButton(
+              onPressed: onActionTap,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: _gold,
+                foregroundColor: Colors.black,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(999),
+                ),
+              ),
+              child: Text(actionLabel),
+            ),
+          ],
+        ],
       ),
     );
   }
@@ -1024,165 +1504,152 @@ class ProfileHomePage extends StatelessWidget {
                         ),
                         const SizedBox(height: 18),
                         _statsCard(context),
-                        const SizedBox(height: 28),
-                        Align(
-                          alignment: Alignment.centerLeft,
-                          child: _sectionTitle('About Me'),
-                        ),
-                        const SizedBox(height: 12),
-                        Align(
-                          alignment: Alignment.centerLeft,
-                          child: Text(
-                            _aboutText(),
-                            style: TextStyle(
-                              color: Colors.white.withValues(alpha: 0.82),
-                              fontSize: 15,
-                              height: 1.6,
-                            ),
+                        if (isMe && _section == ProfileHomeSection.content) ...[
+                          const SizedBox(height: 24),
+                          _buildContentSection(context),
+                        ] else ...[
+                          const SizedBox(height: 28),
+                          Align(
+                            alignment: Alignment.centerLeft,
+                            child: _sectionTitle('About Me'),
                           ),
-                        ),
-                        const SizedBox(height: 24),
-                        Container(
-                          decoration: BoxDecoration(
-                            gradient: const LinearGradient(
-                              colors: [
-                                Color(0xFF101010),
-                                Color(0xFF0E0E0E),
-                                Color(0xFF090909),
-                              ],
-                              begin: Alignment.topLeft,
-                              end: Alignment.bottomRight,
-                            ),
-                            borderRadius: BorderRadius.circular(24),
-                            border: Border.all(
-                              color: Colors.white.withValues(alpha: 0.065),
-                            ),
-                            boxShadow: [
-                              BoxShadow(
-                                color: Colors.black.withValues(alpha: 0.45),
-                                blurRadius: 24,
-                                offset: const Offset(0, 12),
+                          const SizedBox(height: 12),
+                          Align(
+                            alignment: Alignment.centerLeft,
+                            child: Text(
+                              _aboutText(),
+                              style: TextStyle(
+                                color: Colors.white.withValues(alpha: 0.82),
+                                fontSize: 15,
+                                height: 1.6,
                               ),
-                            ],
-                          ),
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 18,
-                              vertical: 18,
                             ),
-                            child: IntrinsicHeight(
-                              child: Row(
-                                crossAxisAlignment: CrossAxisAlignment.stretch,
-                                children: [
-                                  Expanded(
-                                    child: Column(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        _profileInfoTile(
-                                          icon: LucideIcons.calendarDays,
-                                          label: 'Date of Birth',
-                                          value: _dateLine(),
-                                        ),
-                                        const SizedBox(height: 18),
-                                        _profileInfoTile(
-                                          icon: LucideIcons.mapPin,
-                                          label: 'Location',
-                                          value: _location(),
-                                        ),
-                                        const SizedBox(height: 18),
-                                        _profileInfoTile(
-                                          icon: LucideIcons.graduationCap,
-                                          label: 'Class',
-                                          value: _profession(),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                  Container(
-                                    width: 1,
-                                    margin: const EdgeInsets.symmetric(
-                                      horizontal: 16,
-                                    ),
-                                    color: Colors.white.withValues(alpha: 0.08),
-                                  ),
-                                  Expanded(
-                                    child: Column(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        _profileInfoTile(
-                                          icon: LucideIcons.heart,
-                                          label: 'Hobbies',
-                                          value: hobbies.isNotEmpty
-                                              ? hobbies.join(', ')
-                                              : _missingText,
-                                          iconColor: const Color(0xFFF48FAF),
-                                        ),
-                                        const SizedBox(height: 18),
-                                        _profileInfoTile(
-                                          icon: LucideIcons.palette,
-                                          label: 'Favorite Color',
-                                          value: _stringValue(
-                                            ['favorite_color', 'favoriteColor'],
-                                            fallback: _missingText,
-                                          ),
-                                          iconColor: const Color(0xFFB68CFF),
-                                        ),
-                                        const SizedBox(height: 18),
-                                        _profileInfoTile(
-                                          icon: LucideIcons.bookOpen,
-                                          label: 'Favorite Subject',
-                                          value: _stringValue(
-                                            [
-                                              'favorite_subject',
-                                              'favoriteSubject'
-                                            ],
-                                            fallback: _missingText,
-                                          ),
-                                          iconColor: const Color(0xFFB68CFF),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
+                          ),
+                          const SizedBox(height: 24),
+                          Container(
+                            decoration: BoxDecoration(
+                              gradient: const LinearGradient(
+                                colors: [
+                                  Color(0xFF101010),
+                                  Color(0xFF0E0E0E),
+                                  Color(0xFF090909),
                                 ],
+                                begin: Alignment.topLeft,
+                                end: Alignment.bottomRight,
+                              ),
+                              borderRadius: BorderRadius.circular(24),
+                              border: Border.all(
+                                color: Colors.white.withValues(alpha: 0.065),
+                              ),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: Colors.black.withValues(alpha: 0.45),
+                                  blurRadius: 24,
+                                  offset: const Offset(0, 12),
+                                ),
+                              ],
+                            ),
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 18,
+                                vertical: 18,
+                              ),
+                              child: IntrinsicHeight(
+                                child: Row(
+                                  crossAxisAlignment:
+                                      CrossAxisAlignment.stretch,
+                                  children: [
+                                    Expanded(
+                                      child: Column(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          _profileInfoTile(
+                                            icon: LucideIcons.calendarDays,
+                                            label: 'Date of Birth',
+                                            value: _dateLine(),
+                                          ),
+                                          const SizedBox(height: 18),
+                                          _profileInfoTile(
+                                            icon: LucideIcons.mapPin,
+                                            label: 'Location',
+                                            value: _location(),
+                                          ),
+                                          const SizedBox(height: 18),
+                                          _profileInfoTile(
+                                            icon: LucideIcons.graduationCap,
+                                            label: 'Class',
+                                            value: _profession(),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                    Container(
+                                      width: 1,
+                                      margin: const EdgeInsets.symmetric(
+                                        horizontal: 16,
+                                      ),
+                                      color:
+                                          Colors.white.withValues(alpha: 0.08),
+                                    ),
+                                    Expanded(
+                                      child: Column(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          _profileInfoTile(
+                                            icon: LucideIcons.heart,
+                                            label: 'Hobbies',
+                                            value: hobbies.isNotEmpty
+                                                ? hobbies.join(', ')
+                                                : _missingText,
+                                            iconColor: const Color(0xFFF48FAF),
+                                          ),
+                                          const SizedBox(height: 18),
+                                          _profileInfoTile(
+                                            icon: LucideIcons.palette,
+                                            label: 'Favorite Color',
+                                            value: _stringValue(
+                                              [
+                                                'favorite_color',
+                                                'favoriteColor'
+                                              ],
+                                              fallback: _missingText,
+                                            ),
+                                            iconColor: const Color(0xFFB68CFF),
+                                          ),
+                                          const SizedBox(height: 18),
+                                          _profileInfoTile(
+                                            icon: LucideIcons.bookOpen,
+                                            label: 'Favorite Subject',
+                                            value: _stringValue(
+                                              [
+                                                'favorite_subject',
+                                                'favoriteSubject'
+                                              ],
+                                              fallback: _missingText,
+                                            ),
+                                            iconColor: const Color(0xFFB68CFF),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ],
+                                ),
                               ),
                             ),
                           ),
-                        ),
-                        const SizedBox(height: 24),
-                        Align(
-                          alignment: Alignment.centerLeft,
-                          child: _sectionTitle('Hobbies & Interests'),
-                        ),
-                        const SizedBox(height: 14),
-                        Wrap(
-                          spacing: 10,
-                          runSpacing: 10,
-                          children: [
-                            if (hobbies.isEmpty)
-                              Chip(
-                                label: const Text(_missingText),
-                                backgroundColor:
-                                    Colors.white.withValues(alpha: 0.03),
-                                side: BorderSide(
-                                  color: Colors.white.withValues(alpha: 0.08),
-                                ),
-                                labelStyle: const TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.w500,
-                                ),
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 10,
-                                  vertical: 10,
-                                ),
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(999),
-                                ),
-                              )
-                            else
-                              for (final hobby in hobbies.take(6))
+                          const SizedBox(height: 24),
+                          Align(
+                            alignment: Alignment.centerLeft,
+                            child: _sectionTitle('Hobbies & Interests'),
+                          ),
+                          const SizedBox(height: 14),
+                          Wrap(
+                            spacing: 10,
+                            runSpacing: 10,
+                            children: [
+                              if (hobbies.isEmpty)
                                 Chip(
-                                  label: Text(hobby),
+                                  label: const Text(_missingText),
                                   backgroundColor:
                                       Colors.white.withValues(alpha: 0.03),
                                   side: BorderSide(
@@ -1200,9 +1667,33 @@ class ProfileHomePage extends StatelessWidget {
                                   shape: RoundedRectangleBorder(
                                     borderRadius: BorderRadius.circular(999),
                                   ),
-                                ),
-                          ],
-                        ),
+                                )
+                              else
+                                for (final hobby in hobbies.take(6))
+                                  Chip(
+                                    label: Text(hobby),
+                                    backgroundColor:
+                                        Colors.white.withValues(alpha: 0.03),
+                                    side: BorderSide(
+                                      color:
+                                          Colors.white.withValues(alpha: 0.08),
+                                    ),
+                                    labelStyle: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 10,
+                                      vertical: 10,
+                                    ),
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(999),
+                                    ),
+                                  ),
+                            ],
+                          ),
+                        ],
                       ],
                     ),
                   ),
@@ -1233,6 +1724,16 @@ class ProfileHomePage extends StatelessWidget {
       ),
     );
   }
+}
+
+class _ProfileTabData {
+  final ProfileContentTab tab;
+  final String label;
+
+  const _ProfileTabData({
+    required this.tab,
+    required this.label,
+  });
 }
 
 class _StatItem {
@@ -1274,6 +1775,146 @@ class _StatTile extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+class _MockContentCard {
+  final String title;
+  final String label;
+  final Color topColor;
+  final Color bottomColor;
+  final IconData icon;
+
+  const _MockContentCard({
+    required this.title,
+    required this.label,
+    required this.topColor,
+    required this.bottomColor,
+    required this.icon,
+  });
+}
+
+class _MockContentTile extends StatelessWidget {
+  final _MockContentCard card;
+
+  const _MockContentTile({required this.card});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(22),
+        gradient: LinearGradient(
+          colors: [card.topColor, card.bottomColor],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: card.topColor.withValues(alpha: 0.22),
+            blurRadius: 18,
+            offset: const Offset(0, 10),
+          ),
+        ],
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(22),
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            Positioned(
+              top: -24,
+              right: -20,
+              child: Container(
+                width: 88,
+                height: 88,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: Colors.white.withValues(alpha: 0.08),
+                ),
+              ),
+            ),
+            Positioned(
+              bottom: -18,
+              left: -10,
+              child: Container(
+                width: 72,
+                height: 72,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: Colors.black.withValues(alpha: 0.16),
+                ),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.all(14),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Container(
+                        width: 30,
+                        height: 30,
+                        decoration: BoxDecoration(
+                          color: Colors.black.withValues(alpha: 0.18),
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(
+                            color: Colors.white.withValues(alpha: 0.12),
+                          ),
+                        ),
+                        child: Icon(
+                          card.icon,
+                          color: Colors.white.withValues(alpha: 0.95),
+                          size: 15,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const Spacer(),
+                  Text(
+                    card.title,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 22,
+                      fontWeight: FontWeight.w800,
+                      height: 1.0,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    card.label,
+                    style: TextStyle(
+                      color: Colors.white.withValues(alpha: 0.82),
+                      fontSize: 13,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Positioned(
+              top: 0,
+              left: 0,
+              right: 0,
+              child: Container(
+                height: 60,
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [
+                      Colors.white.withValues(alpha: 0.10),
+                      Colors.transparent,
+                    ],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

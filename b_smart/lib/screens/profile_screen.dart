@@ -3165,6 +3165,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
             })
             .where(hasRenderableGridMedia)
             .toList();
+        final tweetsForHome = (_tweetsLoadedForUserId == profileUserId)
+            ? _tweets
+            : const <FeedPost>[];
 
         final likesCount = tryReadInt(displayProfile, const [
               'likes_count',
@@ -3357,6 +3360,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
           likesCount: likesCount,
           isMe: isMe,
           isValidated: isValidated,
+          posts: postsForGrid,
+          reels: reelsForGrid,
+          tweets: tweetsForHome,
+          onOpenStories: isMe ? _openStoriesFromProfile : null,
           onBack: () => Navigator.of(context)
               .pushNamedAndRemoveUntil('/home', (route) => false),
           onMenu: isMe
