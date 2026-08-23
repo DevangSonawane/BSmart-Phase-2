@@ -241,6 +241,10 @@ class _ProfileHomePageState extends State<ProfileHomePage> {
     });
   }
 
+  void _showOverviewSection() {
+    setState(() => _section = ProfileHomeSection.overview);
+  }
+
   void _selectContentTab(ProfileContentTab tab) {
     if (_contentTab == tab) return;
     setState(() => _contentTab = tab);
@@ -729,18 +733,22 @@ class _ProfileHomePageState extends State<ProfileHomePage> {
       _ProfileTabData(
         tab: ProfileContentTab.posts,
         label: 'Posts',
+        icon: LucideIcons.grid2x2,
       ),
       _ProfileTabData(
         tab: ProfileContentTab.reels,
         label: 'Reels',
+        icon: Icons.movie_creation_outlined,
       ),
       _ProfileTabData(
         tab: ProfileContentTab.tweets,
         label: 'Tweets',
+        icon: Icons.chat_bubble_outline_rounded,
       ),
       _ProfileTabData(
         tab: ProfileContentTab.stories,
-        label: 'Stories',
+        label: 'Promote',
+        icon: Icons.campaign_rounded,
       ),
     ];
 
@@ -817,16 +825,27 @@ class _ProfileHomePageState extends State<ProfileHomePage> {
       borderRadius: BorderRadius.circular(12),
       onTap: onTap,
       child: Center(
-        child: Text(
-          tab.label,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: TextStyle(
-            color: active ? activeColor : inactiveColor.withValues(alpha: 0.8),
-            fontSize: 11.5,
-            fontWeight: FontWeight.w600,
-            letterSpacing: 0.15,
-          ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              tab.icon,
+              size: 13,
+              color: active ? activeColor : inactiveColor.withValues(alpha: 0.8),
+            ),
+            const SizedBox(width: 5),
+            Text(
+              tab.label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: active ? activeColor : inactiveColor.withValues(alpha: 0.8),
+                fontSize: 11.5,
+                fontWeight: FontWeight.w600,
+                letterSpacing: 0.15,
+              ),
+            ),
+          ],
         ),
       ),
     );
@@ -869,32 +888,39 @@ class _ProfileHomePageState extends State<ProfileHomePage> {
         subtitle: 'Some cards will appear here once content is available.',
         cards: const [
           _MockContentCard(
-            title: '128',
-            label: 'Posts',
-            topColor: Color(0xFF6D28D9),
-            bottomColor: Color(0xFF1B1036),
-            icon: LucideIcons.grid2x2,
+            count: '128',
+            topColor: Color(0xFF2C75FF),
+            bottomColor: Color(0xFF0D1C44),
+            icon: Icons.landscape_rounded,
+            countIcon: Icons.favorite_border_rounded,
           ),
           _MockContentCard(
-            title: '2.3K',
-            label: 'Reels',
-            topColor: Color(0xFF9333EA),
-            bottomColor: Color(0xFF180F2C),
-            icon: LucideIcons.clapperboard,
+            count: '2.3K',
+            topColor: Color(0xFF7A2CFF),
+            bottomColor: Color(0xFF111027),
+            icon: Icons.movie_creation_outlined,
+            countIcon: Icons.play_arrow_rounded,
           ),
           _MockContentCard(
-            title: '312',
-            label: 'Stories',
-            topColor: Color(0xFFDB2777),
-            bottomColor: Color(0xFF2C1020),
-            icon: LucideIcons.refreshCcw,
+            count: '312',
+            topColor: Color(0xFFF4B34E),
+            bottomColor: Color(0xFF38211D),
+            icon: Icons.portrait_rounded,
+            countIcon: Icons.favorite_border_rounded,
           ),
           _MockContentCard(
-            title: '1.1K',
-            label: 'Saved',
-            topColor: Color(0xFFF59E0B),
-            bottomColor: Color(0xFF2B1A08),
-            icon: LucideIcons.bookMarked,
+            count: '1.1K',
+            topColor: Color(0xFFEF8C45),
+            bottomColor: Color(0xFF24150D),
+            icon: Icons.directions_car_filled_rounded,
+            countIcon: Icons.play_arrow_rounded,
+          ),
+          _MockContentCard(
+            count: '98',
+            topColor: Color(0xFF272D63),
+            bottomColor: Color(0xFF0A0D1E),
+            icon: Icons.brightness_3_rounded,
+            countIcon: Icons.favorite_border_rounded,
           ),
         ],
       );
@@ -914,32 +940,32 @@ class _ProfileHomePageState extends State<ProfileHomePage> {
         subtitle: 'Keep this section ready with sample cards.',
         cards: const [
           _MockContentCard(
-            title: 'A',
-            label: 'Tweet',
+            count: 'A',
             topColor: Color(0xFF7C3AED),
             bottomColor: Color(0xFF24104D),
-            icon: LucideIcons.messageSquare,
+            icon: Icons.chat_bubble_outline_rounded,
+            countIcon: Icons.favorite_border_rounded,
           ),
           _MockContentCard(
-            title: 'B',
-            label: 'Buzz',
+            count: 'B',
             topColor: Color(0xFF06B6D4),
             bottomColor: Color(0xFF08334A),
-            icon: LucideIcons.messageCircle,
+            icon: Icons.forum_outlined,
+            countIcon: Icons.play_arrow_rounded,
           ),
           _MockContentCard(
-            title: 'C',
-            label: 'Reply',
+            count: 'C',
             topColor: Color(0xFF14B8A6),
             bottomColor: Color(0xFF0C3B37),
-            icon: LucideIcons.reply,
+            icon: Icons.reply_rounded,
+            countIcon: Icons.favorite_border_rounded,
           ),
           _MockContentCard(
-            title: 'D',
-            label: 'Thread',
+            count: 'D',
             topColor: Color(0xFFF97316),
             bottomColor: Color(0xFF4A2108),
             icon: Icons.format_align_left_rounded,
+            countIcon: Icons.play_arrow_rounded,
           ),
         ],
       );
@@ -964,45 +990,45 @@ class _ProfileHomePageState extends State<ProfileHomePage> {
   Widget _buildStoriesTab(BuildContext context) {
     if (onOpenStories == null) {
       return _mockContentGrid(
-        title: 'No stories yet',
+        title: 'No promote yet',
         subtitle: 'A few placeholder cards keep the layout lively.',
         cards: const [
           _MockContentCard(
-            title: '98',
-            label: 'Story',
+            count: '98',
             topColor: Color(0xFF8B5CF6),
             bottomColor: Color(0xFF24114D),
-            icon: LucideIcons.refreshCcw,
+            icon: Icons.auto_awesome_rounded,
+            countIcon: Icons.favorite_border_rounded,
           ),
           _MockContentCard(
-            title: '45',
-            label: 'Clip',
+            count: '45',
             topColor: Color(0xFFEC4899),
             bottomColor: Color(0xFF4D102C),
-            icon: LucideIcons.clapperboard,
+            icon: Icons.movie_creation_outlined,
+            countIcon: Icons.play_arrow_rounded,
           ),
           _MockContentCard(
-            title: '12',
-            label: 'Day',
+            count: '12',
             topColor: Color(0xFFF59E0B),
             bottomColor: Color(0xFF4D2B08),
-            icon: LucideIcons.sunMedium,
+            icon: Icons.wb_sunny_outlined,
+            countIcon: Icons.favorite_border_rounded,
           ),
           _MockContentCard(
-            title: '7',
-            label: 'Live',
+            count: '7',
             topColor: Color(0xFF22C55E),
             bottomColor: Color(0xFF0B3D24),
-            icon: LucideIcons.bolt,
+            icon: Icons.bolt_rounded,
+            countIcon: Icons.play_arrow_rounded,
           ),
         ],
       );
     }
     return _emptyContentState(
-      title: 'Stories are available',
-      subtitle: 'Tap below to open your story viewer.',
-      icon: LucideIcons.refreshCcw,
-      actionLabel: 'Open Stories',
+      title: 'Promote is available',
+      subtitle: 'Tap below to open your promotion tools.',
+      icon: Icons.campaign_rounded,
+      actionLabel: 'Open Promote',
       onActionTap: onOpenStories,
     );
   }
@@ -1032,20 +1058,23 @@ class _ProfileHomePageState extends State<ProfileHomePage> {
           ),
         ),
         const SizedBox(height: 14),
-        GridView.builder(
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          itemCount: cards.length,
-          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-            crossAxisCount: 2,
-            crossAxisSpacing: 12,
-            mainAxisSpacing: 12,
-            childAspectRatio: 0.86,
+        SizedBox(
+          height: 220,
+          child: ListView.separated(
+            scrollDirection: Axis.horizontal,
+            clipBehavior: Clip.none,
+            physics: const BouncingScrollPhysics(),
+            itemCount: cards.length,
+            padding: const EdgeInsets.symmetric(horizontal: 2),
+            itemBuilder: (context, index) {
+              final card = cards[index];
+              return SizedBox(
+                width: 136,
+                child: _MockContentTile(card: card),
+              );
+            },
+            separatorBuilder: (context, index) => const SizedBox(width: 12),
           ),
-          itemBuilder: (context, index) {
-            final card = cards[index];
-            return _MockContentTile(card: card);
-          },
         ),
       ],
     );
@@ -1439,29 +1468,33 @@ class _ProfileHomePageState extends State<ProfileHomePage> {
                       crossAxisAlignment: CrossAxisAlignment.center,
                       children: [
                         const SizedBox(height: 8),
-                        Wrap(
-                          alignment: WrapAlignment.center,
-                          crossAxisAlignment: WrapCrossAlignment.center,
-                          children: [
-                            Text(
-                              displayName,
-                              textAlign: TextAlign.center,
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 30,
-                                fontWeight: FontWeight.w700,
-                                height: 1.0,
+                        InkWell(
+                          borderRadius: BorderRadius.circular(12),
+                          onTap: _showOverviewSection,
+                          child: Wrap(
+                            alignment: WrapAlignment.center,
+                            crossAxisAlignment: WrapCrossAlignment.center,
+                            children: [
+                              Text(
+                                displayName,
+                                textAlign: TextAlign.center,
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 30,
+                                  fontWeight: FontWeight.w700,
+                                  height: 1.0,
+                                ),
                               ),
-                            ),
-                            if (showBadge) ...[
-                              const SizedBox(width: 8),
-                              const Icon(
-                                Icons.verified_rounded,
-                                color: _gold,
-                                size: 22,
-                              ),
+                              if (showBadge) ...[
+                                const SizedBox(width: 8),
+                                const Icon(
+                                  Icons.verified_rounded,
+                                  color: _gold,
+                                  size: 22,
+                                ),
+                              ],
                             ],
-                          ],
+                          ),
                         ),
                         const SizedBox(height: 8),
                         Text(
@@ -1729,10 +1762,12 @@ class _ProfileHomePageState extends State<ProfileHomePage> {
 class _ProfileTabData {
   final ProfileContentTab tab;
   final String label;
+  final IconData icon;
 
   const _ProfileTabData({
     required this.tab,
     required this.label,
+    required this.icon,
   });
 }
 
@@ -1780,18 +1815,18 @@ class _StatTile extends StatelessWidget {
 }
 
 class _MockContentCard {
-  final String title;
-  final String label;
+  final String count;
   final Color topColor;
   final Color bottomColor;
   final IconData icon;
+  final IconData countIcon;
 
   const _MockContentCard({
-    required this.title,
-    required this.label,
+    required this.count,
     required this.topColor,
     required this.bottomColor,
     required this.icon,
+    required this.countIcon,
   });
 }
 
@@ -1804,7 +1839,7 @@ class _MockContentTile extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(22),
+        borderRadius: BorderRadius.circular(24),
         gradient: LinearGradient(
           colors: [card.topColor, card.bottomColor],
           begin: Alignment.topLeft,
@@ -1819,16 +1854,16 @@ class _MockContentTile extends StatelessWidget {
         ],
       ),
       child: ClipRRect(
-        borderRadius: BorderRadius.circular(22),
+        borderRadius: BorderRadius.circular(24),
         child: Stack(
           fit: StackFit.expand,
           children: [
             Positioned(
-              top: -24,
-              right: -20,
+              top: -18,
+              right: -12,
               child: Container(
-                width: 88,
-                height: 88,
+                width: 104,
+                height: 104,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
                   color: Colors.white.withValues(alpha: 0.08),
@@ -1836,80 +1871,74 @@ class _MockContentTile extends StatelessWidget {
               ),
             ),
             Positioned(
-              bottom: -18,
+              bottom: -22,
               left: -10,
               child: Container(
-                width: 72,
-                height: 72,
+                width: 96,
+                height: 96,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
-                  color: Colors.black.withValues(alpha: 0.16),
+                  color: Colors.black.withValues(alpha: 0.20),
                 ),
               ),
             ),
-            Padding(
-              padding: const EdgeInsets.all(14),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Container(
-                        width: 30,
-                        height: 30,
-                        decoration: BoxDecoration(
-                          color: Colors.black.withValues(alpha: 0.18),
-                          borderRadius: BorderRadius.circular(10),
-                          border: Border.all(
-                            color: Colors.white.withValues(alpha: 0.12),
-                          ),
-                        ),
-                        child: Icon(
-                          card.icon,
-                          color: Colors.white.withValues(alpha: 0.95),
-                          size: 15,
-                        ),
-                      ),
-                    ],
-                  ),
-                  const Spacer(),
-                  Text(
-                    card.title,
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 22,
-                      fontWeight: FontWeight.w800,
-                      height: 1.0,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    card.label,
-                    style: TextStyle(
-                      color: Colors.white.withValues(alpha: 0.82),
-                      fontSize: 13,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            Positioned(
-              top: 0,
-              left: 0,
-              right: 0,
-              child: Container(
-                height: 60,
+            const Positioned.fill(
+              child: DecoratedBox(
                 decoration: BoxDecoration(
                   gradient: LinearGradient(
                     colors: [
-                      Colors.white.withValues(alpha: 0.10),
-                      Colors.transparent,
+                      Color(0x00000000),
+                      Color(0x22000000),
+                      Color(0x99000000),
                     ],
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
                   ),
                 ),
+              ),
+            ),
+            Positioned(
+              top: 12,
+              left: 12,
+              child: Container(
+                width: 28,
+                height: 28,
+                decoration: BoxDecoration(
+                  color: Colors.black.withValues(alpha: 0.22),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(
+                    color: Colors.white.withValues(alpha: 0.10),
+                  ),
+                ),
+                child: Icon(
+                  card.icon,
+                  color: Colors.white.withValues(alpha: 0.95),
+                  size: 14,
+                ),
+              ),
+            ),
+            Positioned(
+              left: 12,
+              bottom: 12,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    card.countIcon,
+                    color: Colors.white.withValues(alpha: 0.94),
+                    size: 15,
+                  ),
+                  const SizedBox(width: 6),
+                  Text(
+                    card.count,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 15,
+                      fontWeight: FontWeight.w700,
+                      height: 1.0,
+                    ),
+                  ),
+                ],
               ),
             ),
           ],
