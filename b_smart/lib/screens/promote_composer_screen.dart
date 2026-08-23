@@ -693,14 +693,6 @@ class _PromoteComposerScreenState extends State<PromoteComposerScreen> {
                       onTap: _pickMedia,
                     ),
                   ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: _ActionPill(
-                      label: 'Tag people',
-                      icon: LucideIcons.userRoundPlus,
-                      onTap: _tagPeople,
-                    ),
-                  ),
                 ],
               ),
             ],

@@ -37,7 +37,6 @@ class ProfileHomePage extends StatefulWidget {
   final List<FeedPost> reels;
   final List<FeedPost> tweets;
   final VoidCallback? onOpenStories;
-  final VoidCallback? onCreatePromote;
   final VoidCallback? onBack;
   final VoidCallback? onMenu;
   final VoidCallback? onFollow;
@@ -62,7 +61,6 @@ class ProfileHomePage extends StatefulWidget {
     required this.reels,
     required this.tweets,
     required this.onOpenStories,
-    this.onCreatePromote,
     required this.onBack,
     required this.onMenu,
     required this.onFollow,
@@ -101,7 +99,6 @@ class _ProfileHomePageState extends State<ProfileHomePage> {
   List<FeedPost> get reels => widget.reels;
   List<FeedPost> get tweets => widget.tweets;
   VoidCallback? get onOpenStories => widget.onOpenStories;
-  VoidCallback? get onCreatePromote => widget.onCreatePromote;
   VoidCallback? get onBack => widget.onBack;
   VoidCallback? get onMenu => widget.onMenu;
   VoidCallback? get onFollow => widget.onFollow;
@@ -894,18 +891,25 @@ class _ProfileHomePageState extends State<ProfileHomePage> {
     List<FeedPost> items, {
     String emptyLabel = 'No posts yet',
   }) {
-    if (items.isEmpty) {
-      return _emptyContentState(
-        title: emptyLabel,
-        subtitle: 'Posts will appear here once they are available.',
-        icon: LucideIcons.grid2x2,
-      );
-    }
-    return PostsGrid(
-      posts: items,
-      onTap: (post) {
-        Navigator.of(context).pushNamed('/post/${post.id}');
-      },
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (items.isEmpty)
+          _emptyContentState(
+            title: emptyLabel,
+            subtitle: 'Posts will appear here once they are available.',
+            icon: LucideIcons.grid2x2,
+          )
+        else
+          PostsGrid(
+            posts: items,
+            onTap: (post) {
+              Navigator.of(context).pushNamed('/post/${post.id}');
+            },
+          ),
+        const SizedBox(height: 18),
+        _buildPostsActionCards(context),
+      ],
     );
   }
 
@@ -948,6 +952,81 @@ class _ProfileHomePageState extends State<ProfileHomePage> {
       icon: LucideIcons.sparkles,
       actionLabel: 'Open Campaigns',
       onActionTap: onOpenStories,
+    );
+  }
+
+  Widget _buildPostsActionCards(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final availableWidth = constraints.maxWidth;
+        final cardWidth = availableWidth >= 420 ? 170.0 : 156.0;
+        const gap = 12.0;
+        return SizedBox(
+          height: 226,
+          child: SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            physics: const BouncingScrollPhysics(),
+            clipBehavior: Clip.none,
+            child: Row(
+              children: [
+                SizedBox(
+                  width: cardWidth,
+                  child: _PostsActionCard(
+                    data: _PostsActionCardData(
+                      title: 'Promote',
+                      subtitle: 'Boost your content and grow faster',
+                      buttonLabel: 'Create Promote',
+                      icon: Icons.campaign_rounded,
+                      iconColor: const Color(0xFFF0D7FF),
+                      iconBackground: const LinearGradient(
+                        colors: [Color(0xFF9B5CF6), Color(0xFF5C2EC5)],
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                      ),
+                      cardBackground: const LinearGradient(
+                        colors: [Color(0xFF1A1230), Color(0xFF120D22)],
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                      ),
+                      buttonBackground: const Color(0xFF2C2148),
+                      buttonForeground: const Color(0xFFB07CFF),
+                      onButtonTap: () =>
+                          Navigator.of(context).pushNamed('/promote/create'),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: gap),
+                SizedBox(
+                  width: cardWidth,
+                  child: const _PostsActionCard(
+                    data: _PostsActionCardData(
+                      title: 'Miles',
+                      subtitle: 'Keep engaging, keep earning!',
+                      buttonLabel: 'Lvl 8',
+                      icon: Icons.monetization_on_rounded,
+                      iconColor: Color(0xFFFFE7A8),
+                      iconBackground: LinearGradient(
+                        colors: [Color(0xFFFFC44D), Color(0xFFE29A17)],
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                      ),
+                      cardBackground: LinearGradient(
+                        colors: [Color(0xFF191614), Color(0xFF11100F)],
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                      ),
+                      buttonBackground: Color(0xFF2B2412),
+                      buttonForeground: Color(0xFFF0B63A),
+                      showProgress: true,
+                      progress: 0.62,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
     );
   }
 
@@ -1802,6 +1881,169 @@ class _StatTile extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+class _PostsActionCardData {
+  final String title;
+  final String subtitle;
+  final String buttonLabel;
+  final IconData icon;
+  final Color iconColor;
+  final Gradient iconBackground;
+  final Gradient cardBackground;
+  final Color buttonBackground;
+  final Color buttonForeground;
+  final bool showProgress;
+  final double progress;
+  final VoidCallback? onButtonTap;
+
+  const _PostsActionCardData({
+    required this.title,
+    required this.subtitle,
+    required this.buttonLabel,
+    required this.icon,
+    required this.iconColor,
+    required this.iconBackground,
+    required this.cardBackground,
+    required this.buttonBackground,
+    required this.buttonForeground,
+    this.showProgress = false,
+    this.progress = 0.0,
+    this.onButtonTap,
+  });
+}
+
+class _PostsActionCard extends StatelessWidget {
+  final _PostsActionCardData data;
+
+  const _PostsActionCard({required this.data});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      height: 218,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(24),
+        gradient: data.cardBackground,
+        border: Border.all(color: Colors.white.withValues(alpha: 0.075)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.28),
+            blurRadius: 18,
+            offset: const Offset(0, 10),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  data.title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+              const Icon(
+                Icons.chevron_right_rounded,
+                color: Colors.white70,
+                size: 17,
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          Container(
+            width: 52,
+            height: 52,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              gradient: data.iconBackground,
+              boxShadow: [
+                BoxShadow(
+                  color: data.iconColor.withValues(alpha: 0.24),
+                  blurRadius: 18,
+                  offset: const Offset(0, 8),
+                ),
+              ],
+            ),
+            child: Icon(data.icon, color: data.iconColor, size: 26),
+          ),
+          const SizedBox(height: 16),
+          Text(
+            data.subtitle,
+            maxLines: 3,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: Colors.white.withValues(alpha: 0.78),
+              fontSize: 12.2,
+              height: 1.3,
+            ),
+          ),
+          const Spacer(),
+          if (data.showProgress) ...[
+            ClipRRect(
+              borderRadius: BorderRadius.circular(999),
+              child: Container(
+                height: 5,
+                color: Colors.white.withValues(alpha: 0.08),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: FractionallySizedBox(
+                    widthFactor: data.progress.clamp(0.0, 1.0),
+                    child: Container(
+                      decoration: const BoxDecoration(
+                        gradient: LinearGradient(
+                          colors: [Color(0xFFF7C14A), Color(0xFFEEA827)],
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 8),
+          ],
+          Align(
+            alignment: Alignment.centerLeft,
+            child: Material(
+              color: Colors.transparent,
+              child: InkWell(
+                borderRadius: BorderRadius.circular(999),
+                onTap: data.onButtonTap,
+                child: Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+                  decoration: BoxDecoration(
+                    color: data.buttonBackground,
+                    borderRadius: BorderRadius.circular(999),
+                    border: Border.all(
+                      color: Colors.white.withValues(alpha: 0.04),
+                    ),
+                  ),
+                  child: Text(
+                    data.buttonLabel,
+                    style: TextStyle(
+                      color: data.buttonForeground,
+                      fontSize: 12.2,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
