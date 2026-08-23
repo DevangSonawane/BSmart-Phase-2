@@ -1140,6 +1140,27 @@ class _ProfileScreenState extends State<ProfileScreen> {
     });
   }
 
+  Future<void> _deletePromoteReel(FeedPost post) async {
+    final promoteId = _promoteReelIdForPost(post);
+    if (promoteId.isEmpty) return;
+
+    try {
+      await _promoteReelsApi.deletePromoteReel(promoteId);
+      if (!mounted) return;
+      setState(() {
+        _promotes.removeWhere((item) => item.id == post.id);
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Campaign deleted')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to delete campaign: $e')),
+      );
+    }
+  }
+
   void _syncLocalListsWithFeedState() {
     if (!mounted) return;
     final store = StoreProvider.of<AppState>(context, listen: false);
@@ -3363,7 +3384,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
           posts: postsForGrid,
           reels: reelsForGrid,
           tweets: tweetsForHome,
+          promotes: _promotes,
           onOpenStories: isMe ? _openStoriesFromProfile : null,
+          onDeletePromote: isMe ? _deletePromoteReel : null,
           onBack: () => Navigator.of(context)
               .pushNamedAndRemoveUntil('/home', (route) => false),
           onMenu: isMe

@@ -1,12 +1,13 @@
 import 'dart:io';
-import 'dart:ui' as ui;
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:video_player/video_player.dart';
+import 'package:video_thumbnail/video_thumbnail.dart';
 
-import '../api/posts_api.dart';
+import '../api/promote_reels_api.dart';
 import '../api/upload_api.dart';
 import '../models/location_place.dart';
 import '../models/media_model.dart';
@@ -15,6 +16,19 @@ import '../utils/url_helper.dart';
 import 'edit_video_screen.dart';
 import 'location_search_screen.dart';
 import 'tag_people_screen.dart';
+
+double? _tryParseAmount(String value) {
+  final parsed = num.tryParse(value.trim());
+  return parsed?.toDouble();
+}
+
+String _formatMoney(double amount) {
+  final rounded = amount.roundToDouble();
+  if ((amount - rounded).abs() < 0.0001) {
+    return rounded.toStringAsFixed(0);
+  }
+  return amount.toStringAsFixed(2);
+}
 
 class _PromoteDraftMedia {
   final String path;
@@ -98,35 +112,35 @@ class PromoteComposerScreen extends StatefulWidget {
 class _PromoteComposerScreenState extends State<PromoteComposerScreen> {
   final CreateService _createService = CreateService();
   final UploadApi _uploadApi = UploadApi();
-  final PostsApi _postsApi = PostsApi();
+  final PromoteReelsApi _promoteReelsApi = PromoteReelsApi();
   final ImagePicker _picker = ImagePicker();
 
   final TextEditingController _captionCtl = TextEditingController();
-  final TextEditingController _tagCtl = TextEditingController();
   final TextEditingController _locationCtl = TextEditingController();
 
   final List<_PromoteDraftMedia> _media = [];
   final List<_PromoteDraftProduct> _products = [];
-  final List<String> _hashtags = [];
   final List<Map<String, dynamic>> _peopleTags = [];
 
   LocationPlace? _location;
+  String? _coverImagePath;
   bool _hideLikes = false;
   bool _turnOffCommenting = false;
+  bool _advancedSettingsOpen = false;
   bool _isSubmitting = false;
   int _step = 0;
+  int _selectedCoverIndex = 0;
+  Future<List<Uint8List?>>? _coverFramesFuture;
 
   static const _stepTitles = <String>[
     'Media',
     'Products',
     'Details',
-    'Review',
   ];
 
   @override
   void dispose() {
     _captionCtl.dispose();
-    _tagCtl.dispose();
     _locationCtl.dispose();
     super.dispose();
   }
@@ -136,158 +150,97 @@ class _PromoteComposerScreenState extends State<PromoteComposerScreen> {
     return s;
   }
 
-  Future<double> _imageAspectRatio(String path) async {
-    try {
-      final bytes = await File(path).readAsBytes();
-      final ui.Image image = await decodeImageFromList(bytes);
-      if (image.width > 0 && image.height > 0) {
-        return image.width / image.height;
-      }
-    } catch (_) {}
-    return 1.0;
-  }
-
-  Future<double> _videoAspectRatio(String path) async {
-    final controller = VideoPlayerController.file(File(path));
+  Future<_PromoteDraftMedia> _buildVideoDraft(XFile file) async {
+    final controller = VideoPlayerController.file(File(file.path));
+    Duration? duration;
     try {
       await controller.initialize();
-      final aspect = controller.value.aspectRatio;
-      if (aspect.isFinite && aspect > 0) return aspect;
+      duration = controller.value.duration;
     } catch (_) {
-      // fall back below
+      duration = null;
     } finally {
       await controller.dispose();
     }
-    return 9 / 16;
-  }
-
-  Future<_PromoteDraftMedia> _buildDraftMedia(
-    XFile file, {
-    Duration? trimStart,
-    Duration? trimEnd,
-    Duration? duration,
-  }) async {
-    final path = file.path;
-    final lower = file.name.toLowerCase();
-    final isVideo = lower.endsWith('.mp4') ||
-        lower.endsWith('.mov') ||
-        lower.endsWith('.m4v') ||
-        lower.endsWith('.3gp') ||
-        lower.endsWith('.webm') ||
-        lower.endsWith('.mkv');
-    final aspect =
-        isVideo ? await _videoAspectRatio(path) : await _imageAspectRatio(path);
     return _PromoteDraftMedia(
-      path: path,
-      isVideo: isVideo,
-      aspectRatio: aspect,
-      trimStart: trimStart,
-      trimEnd: trimEnd,
+      path: file.path,
+      isVideo: true,
+      aspectRatio: 9 / 16,
       duration: duration,
     );
   }
 
-  Future<void> _pickMedia() async {
-    try {
-      final choice = await showModalBottomSheet<String>(
-        context: context,
-        backgroundColor: Colors.transparent,
-        builder: (ctx) {
-          return SafeArea(
-            child: Container(
-              margin: const EdgeInsets.all(12),
-              padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(
-                color: const Color(0xFF121212),
-                borderRadius: BorderRadius.circular(24),
-                border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
-              ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  _sheetHandle(),
-                  const SizedBox(height: 14),
-                  _sheetOption(
-                    icon: LucideIcons.imagePlus,
-                    title: 'Add photos',
-                    subtitle: 'Pick one or more images from your gallery',
-                    onTap: () => Navigator.pop(ctx, 'image'),
-                  ),
-                  const SizedBox(height: 10),
-                  _sheetOption(
-                    icon: LucideIcons.video,
-                    title: 'Add video',
-                    subtitle: 'Pick a short vertical clip to promote',
-                    onTap: () => Navigator.pop(ctx, 'video'),
-                  ),
-                  const SizedBox(height: 10),
-                ],
-              ),
-            ),
-          );
-        },
+  Future<List<Uint8List?>> _buildCoverFrames(
+    String path, {
+    Duration? duration,
+  }) async {
+    final totalMs = duration?.inMilliseconds ?? 0;
+    const frameCount = 8;
+    final frames = <Uint8List?>[];
+    for (var i = 0; i < frameCount; i++) {
+      final timeMs =
+          totalMs > 0 ? ((totalMs * i) / (frameCount - 1)).round() : (i * 750);
+      final bytes = await VideoThumbnail.thumbnailData(
+        video: path,
+        imageFormat: ImageFormat.JPEG,
+        maxWidth: 360,
+        quality: 78,
+        timeMs: timeMs,
       );
-      if (choice == null) return;
+      frames.add(bytes);
+    }
+    return frames;
+  }
 
-      if (choice == 'video') {
-        final file = await _picker.pickVideo(source: ImageSource.gallery);
-        if (file == null) return;
-        final media = await _buildDraftMedia(file);
-        final trimmed = await Navigator.of(context).push<VideoEditResult>(
-          MaterialPageRoute(
-            builder: (_) => EditVideoScreen(
-              media: MediaItem(
-                id: DateTime.now().millisecondsSinceEpoch.toString(),
-                type: MediaType.video,
-                filePath: file.path,
-                createdAt: DateTime.now(),
-              ),
+  Future<void> _pickMedia() async {
+    final messenger = ScaffoldMessenger.of(context);
+    final navigator = Navigator.of(context);
+    try {
+      final file = await _picker.pickVideo(source: ImageSource.gallery);
+      if (file == null) return;
+      final media = await _buildVideoDraft(file);
+      final trimmed = await navigator.push<VideoEditResult>(
+        MaterialPageRoute(
+          builder: (_) => EditVideoScreen(
+            media: MediaItem(
+              id: DateTime.now().millisecondsSinceEpoch.toString(),
+              type: MediaType.video,
+              filePath: file.path,
+              createdAt: DateTime.now(),
             ),
           ),
-        );
-        if (trimmed == null) return;
-        if (!mounted) return;
-        setState(() {
-          _media
-            ..clear()
-            ..add(
-              media.copyWith(
-                trimStart: trimmed.trimStart,
-                trimEnd: trimmed.trimEnd,
-              ),
-            );
-        });
-        return;
-      }
-
-      final picked = await _picker.pickMultiImage(imageQuality: 100);
-
-      if (picked.isEmpty) return;
-
-      final next = <_PromoteDraftMedia>[];
-      for (final file in picked.take(6)) {
-        next.add(await _buildDraftMedia(file));
-      }
-
-      if (!mounted || next.isEmpty) return;
+        ),
+      );
+      if (trimmed == null || !mounted) return;
       setState(() {
-        if (_media.any((item) => item.isVideo)) {
-          _media.clear();
-        }
-        if (next.any((item) => item.isVideo)) {
-          _media
-            ..clear()
-            ..addAll(next.where((item) => item.isVideo));
-        } else {
-          _media.addAll(next.where((item) => !item.isVideo));
-        }
+        _media
+          ..clear()
+          ..add(
+            media.copyWith(
+              trimStart: trimmed.trimStart,
+              trimEnd: trimmed.trimEnd,
+            ),
+          );
+        _selectedCoverIndex = 0;
+        _coverImagePath = null;
+        _coverFramesFuture = _buildCoverFrames(
+          file.path,
+          duration: media.duration,
+        );
       });
     } catch (_) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
+      messenger.showSnackBar(
         const SnackBar(content: Text('Failed to pick media')),
       );
     }
+  }
+
+  Future<void> _pickCoverFromDevice() async {
+    final file = await _picker.pickImage(source: ImageSource.gallery);
+    if (file == null || !mounted) return;
+    setState(() {
+      _coverImagePath = file.path;
+    });
   }
 
   Future<void> _editVideoAt(int index) async {
@@ -326,9 +279,6 @@ class _PromoteComposerScreenState extends State<PromoteComposerScreen> {
 
     final mediaPaths = _media.map((item) => item.path).toList(growable: false);
     final isVideos = _media.map((item) => item.isVideo).toList(growable: false);
-    final coverPaths = _media
-        .map((item) => item.isVideo ? item.path : null)
-        .toList(growable: false);
     final aspectRatios =
         _media.map((item) => item.aspectRatio).toList(growable: false);
     final adjustments =
@@ -338,7 +288,7 @@ class _PromoteComposerScreenState extends State<PromoteComposerScreen> {
         builder: (_) => TagPeopleScreen(
           mediaPaths: mediaPaths,
           isVideos: isVideos,
-          coverPaths: coverPaths,
+          coverPaths: null,
           filterNames: List<String>.filled(_media.length, 'Original'),
           adjustments: adjustments,
           alreadyProcessed: List<bool>.filled(_media.length, false),
@@ -386,29 +336,21 @@ class _PromoteComposerScreenState extends State<PromoteComposerScreen> {
     });
   }
 
-  void _addHashtagFromInput() {
-    final raw = _tagCtl.text.trim();
-    if (raw.isEmpty) return;
-    final value = raw.startsWith('#') ? raw : '#$raw';
-    if (_hashtags.contains(value)) {
-      _tagCtl.clear();
-      return;
-    }
-    setState(() {
-      _hashtags.add(value);
-      _tagCtl.clear();
-    });
-  }
-
   Future<Map<String, dynamic>> _uploadProductImage(String path) async {
     final uploaded = await _uploadApi.uploadPromoteProductFile(path);
     final fileName = _pickString(uploaded['fileName'] ?? uploaded['filename']);
     final fileUrl = _pickString(
-      uploaded['fileUrl'] ?? uploaded['file_url'] ?? uploaded['url'],
+      uploaded['promote_img'] ??
+          uploaded['fileUrl'] ??
+          uploaded['file_url'] ??
+          uploaded['url'],
     );
+    final normalizedUrl = UrlHelper.normalizeUrl(fileUrl);
     return {
       if (fileName.isNotEmpty) 'fileName': fileName,
-      if (fileUrl.isNotEmpty) 'promote_img': UrlHelper.normalizeUrl(fileUrl),
+      if (normalizedUrl.isNotEmpty) 'promote_img': normalizedUrl,
+      if (normalizedUrl.isNotEmpty) 'fileUrl': normalizedUrl,
+      if (normalizedUrl.isNotEmpty) 'url': normalizedUrl,
     };
   }
 
@@ -422,22 +364,28 @@ class _PromoteComposerScreenState extends State<PromoteComposerScreen> {
     }
 
     final caption = _captionCtl.text.trim();
-    final autoTags = RegExp(r'#[a-zA-Z0-9_]+')
+    final tags = RegExp(r'#[a-zA-Z0-9_]+')
         .allMatches(caption)
         .map((m) => m.group(0)!)
         .toList();
-    final tags = <String>{
-      ...autoTags,
-      ..._hashtags,
-    }.toList();
 
     setState(() {
       _isSubmitting = true;
     });
 
     try {
+      List<Uint8List?>? coverFrames;
+      if (_coverFramesFuture != null) {
+        try {
+          coverFrames = await _coverFramesFuture;
+        } catch (_) {
+          coverFrames = null;
+        }
+      }
+
       final mediaPayload = <Map<String, dynamic>>[];
-      for (final item in _media) {
+      for (var index = 0; index < _media.length; index++) {
+        final item = _media[index];
         final path = item.isVideo
             ? await _createService.trimVideoForUpload(
                   inputPath: item.path,
@@ -456,15 +404,43 @@ class _PromoteComposerScreenState extends State<PromoteComposerScreen> {
           uploaded['fileUrl'] ?? uploaded['file_url'] ?? uploaded['url'],
         );
         final normalizedUrl = UrlHelper.normalizeUrl(fileUrl);
+        Map<String, dynamic>? coverPayload;
+        if (item.isVideo &&
+            coverFrames != null &&
+            coverFrames.isNotEmpty &&
+            _selectedCoverIndex >= 0 &&
+            _selectedCoverIndex < coverFrames.length &&
+            coverFrames[_selectedCoverIndex] != null) {
+          final coverBytes = coverFrames[_selectedCoverIndex]!;
+          final coverUpload = await _uploadApi.uploadThumbnailBytes(
+            bytes: coverBytes,
+            filename: 'promote_cover.jpg',
+          );
+          final coverUrl = _pickString(
+            coverUpload['fileUrl'] ??
+                coverUpload['file_url'] ??
+                coverUpload['url'],
+          );
+          final normalizedCoverUrl = UrlHelper.normalizeUrl(coverUrl);
+          if (normalizedCoverUrl.isNotEmpty) {
+            coverPayload = {
+              'coverUrl': normalizedCoverUrl,
+              'uploadedCoverUrl': normalizedCoverUrl,
+              'thumbnails': [normalizedCoverUrl],
+            };
+          }
+        }
         mediaPayload.add({
           if (fileName.isNotEmpty) 'fileName': fileName,
           if (normalizedUrl.isNotEmpty) 'fileUrl': normalizedUrl,
+          if (normalizedUrl.isNotEmpty) 'url': normalizedUrl,
           'ratio': item.aspectRatio,
           'filter': 'none',
-          'type': item.isVideo ? 'video' : 'image',
+          'media_type': item.isVideo ? 'video' : 'image',
           if (item.trimStart != null)
             'trimStartMs': item.trimStart!.inMilliseconds,
           if (item.trimEnd != null) 'trimEndMs': item.trimEnd!.inMilliseconds,
+          if (coverPayload != null) ...coverPayload,
         });
       }
 
@@ -496,24 +472,20 @@ class _PromoteComposerScreenState extends State<PromoteComposerScreen> {
         };
       }).toList();
 
-      await _postsApi.createPost(
-        media: mediaPayload,
-        caption: caption.isEmpty ? null : caption,
-        location: _location?.fullText ?? _locationCtl.text.trim(),
-        locationPlace: _location?.toJson(),
-        tags: tags,
-        peopleTags: peopleTags,
-        products: productsPayload,
-        hideLikesCount: _hideLikes,
-        turnOffCommenting: _turnOffCommenting,
-        type: 'promote',
-      );
+      await _promoteReelsApi.createPromoteReel({
+        'caption': caption,
+        'location': _location?.fullText ?? _locationCtl.text.trim(),
+        'location_data': _location?.toJson(),
+        'media': mediaPayload,
+        'tags': tags,
+        'people_tags': peopleTags,
+        'hide_likes_count': _hideLikes,
+        'turn_off_commenting': _turnOffCommenting,
+        'products': productsPayload,
+      });
 
       if (!mounted) return;
-      Navigator.of(context).pop(true);
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Promote created successfully')),
-      );
+      Navigator.of(context).pushNamedAndRemoveUntil('/home', (route) => false);
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -548,85 +520,13 @@ class _PromoteComposerScreenState extends State<PromoteComposerScreen> {
     });
   }
 
-  Widget _sheetHandle() {
-    return Center(
-      child: Container(
-        width: 42,
-        height: 4,
-        decoration: BoxDecoration(
-          color: Colors.white.withValues(alpha: 0.25),
-          borderRadius: BorderRadius.circular(999),
-        ),
-      ),
-    );
-  }
-
-  Widget _sheetOption({
-    required IconData icon,
-    required String title,
-    required String subtitle,
-    required VoidCallback onTap,
-  }) {
-    return Material(
-      color: const Color(0xFF1A1A1A),
-      borderRadius: BorderRadius.circular(18),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(18),
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.all(14),
-          child: Row(
-            children: [
-              Container(
-                width: 44,
-                height: 44,
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(14),
-                  gradient: const LinearGradient(
-                    colors: [Color(0xFFFFD77A), Color(0xFFB57B17)],
-                  ),
-                ),
-                child: Icon(icon, color: Colors.black, size: 22),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      title,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 15,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      subtitle,
-                      style: TextStyle(
-                        color: Colors.white.withValues(alpha: 0.72),
-                        fontSize: 12,
-                        height: 1.25,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
   Widget _buildMediaStep() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         _buildSectionHeader(
           title: 'Choose your media',
-          subtitle: 'Vertical videos work best for promote placements.',
+          subtitle: 'Pick one video for the promote. Vertical clips work best.',
         ),
         const SizedBox(height: 16),
         _buildHeroCard(
@@ -637,10 +537,10 @@ class _PromoteComposerScreenState extends State<PromoteComposerScreen> {
                   padding: const EdgeInsets.symmetric(vertical: 30),
                   child: Column(
                     children: [
-                      Icon(
-                        Icons.auto_awesome_rounded,
-                        size: 42,
-                        color: Colors.white.withValues(alpha: 0.8),
+                      const Icon(
+                        Icons.play_circle_fill_rounded,
+                        size: 46,
+                        color: Color(0xFFFFD77A),
                       ),
                       const SizedBox(height: 12),
                       Text(
@@ -653,7 +553,7 @@ class _PromoteComposerScreenState extends State<PromoteComposerScreen> {
                       ),
                       const SizedBox(height: 6),
                       Text(
-                        'Add one or more images, or a single video.',
+                        'Add a video from your gallery to start the promote.',
                         textAlign: TextAlign.center,
                         style: TextStyle(
                           color: Colors.white.withValues(alpha: 0.7),
@@ -684,21 +584,306 @@ class _PromoteComposerScreenState extends State<PromoteComposerScreen> {
                   ),
                 ),
               const SizedBox(height: 14),
-              Row(
-                children: [
-                  Expanded(
-                    child: _ActionPill(
-                      label: 'Add media',
-                      icon: LucideIcons.plus,
-                      onTap: _pickMedia,
-                    ),
-                  ),
-                ],
+              _ActionPill(
+                label: _media.isEmpty ? 'Add video' : 'Replace video',
+                icon: LucideIcons.video,
+                onTap: _pickMedia,
               ),
             ],
           ),
         ),
+        const SizedBox(height: 16),
+        if (_media.isNotEmpty) _buildCoverSection(),
       ],
+    );
+  }
+
+  Widget _buildCoverSection() {
+    return _buildHeroCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Choose cover photo',
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: 18,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            'Pick the frame that will represent the promote.',
+            style: TextStyle(
+              color: Colors.white.withValues(alpha: 0.68),
+              fontSize: 12.5,
+            ),
+          ),
+          const SizedBox(height: 14),
+          if (_media.isNotEmpty) ...[
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    'Select a frame below or upload a cover from your device.',
+                    style: TextStyle(
+                      color: Colors.white.withValues(alpha: 0.65),
+                      fontSize: 12,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                TextButton.icon(
+                  onPressed: _pickCoverFromDevice,
+                  icon: const Icon(
+                    LucideIcons.imagePlus,
+                    size: 16,
+                    color: Color(0xFFFFD77A),
+                  ),
+                  label: const Text(
+                    'From device',
+                    style: TextStyle(
+                      color: Color(0xFFFFD77A),
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+          ],
+          if (_media.isEmpty)
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(vertical: 24),
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.04),
+                borderRadius: BorderRadius.circular(22),
+                border: Border.all(
+                  color: Colors.white.withValues(alpha: 0.08),
+                ),
+              ),
+              child: Column(
+                children: [
+                  Icon(
+                    LucideIcons.imagePlus,
+                    color: Colors.white.withValues(alpha: 0.7),
+                    size: 28,
+                  ),
+                  const SizedBox(height: 10),
+                  Text(
+                    'Add a video first to generate cover frames.',
+                    style: TextStyle(
+                      color: Colors.white.withValues(alpha: 0.72),
+                      fontSize: 12.5,
+                    ),
+                  ),
+                ],
+              ),
+            )
+          else
+            FutureBuilder<List<Uint8List?>>(
+              future: _coverFramesFuture,
+              builder: (context, snapshot) {
+                final frames = snapshot.data ?? const <Uint8List?>[];
+                final customCover = _coverImagePath != null &&
+                        _coverImagePath!.isNotEmpty &&
+                        File(_coverImagePath!).existsSync()
+                    ? File(_coverImagePath!)
+                    : null;
+                final selectedBytes = customCover == null &&
+                        frames.isNotEmpty &&
+                        _selectedCoverIndex >= 0 &&
+                        _selectedCoverIndex < frames.length
+                    ? frames[_selectedCoverIndex]
+                    : null;
+                final selectedMedia = customCover != null
+                    ? Image.file(
+                        customCover,
+                        fit: BoxFit.cover,
+                      )
+                    : selectedBytes != null
+                        ? Image.memory(
+                            selectedBytes,
+                            fit: BoxFit.cover,
+                            gaplessPlayback: true,
+                          )
+                        : _VideoThumb(path: _media.first.path);
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Container(
+                      height: 190,
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(24),
+                        border: Border.all(
+                          color: Colors.white.withValues(alpha: 0.08),
+                        ),
+                      ),
+                      clipBehavior: Clip.antiAlias,
+                      child: Stack(
+                        fit: StackFit.expand,
+                        children: [
+                          selectedMedia,
+                          Positioned(
+                            left: 12,
+                            bottom: 12,
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 10,
+                                vertical: 6,
+                              ),
+                              decoration: BoxDecoration(
+                                color: Colors.black.withValues(alpha: 0.5),
+                                borderRadius: BorderRadius.circular(999),
+                              ),
+                              child: Text(
+                                'Selected cover',
+                                style: TextStyle(
+                                  color: Colors.white.withValues(alpha: 0.95),
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    if (customCover != null) ...[
+                      Text(
+                        'Cover selected from your device',
+                        style: TextStyle(
+                          color: Colors.white.withValues(alpha: 0.65),
+                          fontSize: 12,
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: TextButton.icon(
+                          onPressed: () {
+                            setState(() {
+                              _coverImagePath = null;
+                            });
+                          },
+                          icon: const Icon(
+                            LucideIcons.refreshCcw,
+                            size: 16,
+                            color: Color(0xFFFFD77A),
+                          ),
+                          label: const Text(
+                            'Use video frame instead',
+                            style: TextStyle(
+                              color: Color(0xFFFFD77A),
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ] else ...[
+                      Text(
+                        snapshot.connectionState == ConnectionState.waiting
+                            ? 'Generating cover frames...'
+                            : 'Tap a frame below to choose the cover',
+                        style: TextStyle(
+                          color: Colors.white.withValues(alpha: 0.65),
+                          fontSize: 12,
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                    ],
+                    SizedBox(
+                      height: 82,
+                      child: customCover != null
+                          ? const SizedBox.shrink()
+                          : snapshot.connectionState == ConnectionState.waiting
+                              ? const Center(
+                                  child: SizedBox(
+                                    width: 22,
+                                    height: 22,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2.2,
+                                      color: Color(0xFFFFD77A),
+                                    ),
+                                  ),
+                                )
+                              : ListView.separated(
+                                  scrollDirection: Axis.horizontal,
+                                  itemCount: frames.length,
+                                  separatorBuilder: (_, __) =>
+                                      const SizedBox(width: 10),
+                                  itemBuilder: (context, index) {
+                                    final bytes = frames[index];
+                                    final selected =
+                                        index == _selectedCoverIndex;
+                                    return GestureDetector(
+                                      onTap: bytes == null
+                                          ? null
+                                          : () => setState(() {
+                                                _selectedCoverIndex = index;
+                                              }),
+                                      child: AnimatedContainer(
+                                        duration:
+                                            const Duration(milliseconds: 180),
+                                        width: 58,
+                                        decoration: BoxDecoration(
+                                          borderRadius:
+                                              BorderRadius.circular(16),
+                                          border: Border.all(
+                                            color: selected
+                                                ? const Color(0xFFFFD77A)
+                                                : Colors.white
+                                                    .withValues(alpha: 0.08),
+                                            width: selected ? 2 : 1,
+                                          ),
+                                        ),
+                                        clipBehavior: Clip.antiAlias,
+                                        child: bytes == null
+                                            ? Container(
+                                                color: Colors.white
+                                                    .withValues(alpha: 0.05),
+                                                child: const Icon(
+                                                  Icons.image_outlined,
+                                                  color: Colors.white54,
+                                                ),
+                                              )
+                                            : Stack(
+                                                fit: StackFit.expand,
+                                                children: [
+                                                  Image.memory(
+                                                    bytes,
+                                                    fit: BoxFit.cover,
+                                                    gaplessPlayback: true,
+                                                  ),
+                                                  if (selected)
+                                                    Container(
+                                                      color: Colors.black
+                                                          .withValues(
+                                                              alpha: 0.18),
+                                                      child: const Center(
+                                                        child: Icon(
+                                                          LucideIcons.check,
+                                                          color:
+                                                              Color(0xFFFFD77A),
+                                                          size: 18,
+                                                        ),
+                                                      ),
+                                                    ),
+                                                ],
+                                              ),
+                                      ),
+                                    );
+                                  },
+                                ),
+                    ),
+                  ],
+                );
+              },
+            ),
+        ],
+      ),
     );
   }
 
@@ -773,7 +958,7 @@ class _PromoteComposerScreenState extends State<PromoteComposerScreen> {
       children: [
         _buildSectionHeader(
           title: 'Caption and details',
-          subtitle: 'Reuse the same social fields as the main create flow.',
+          subtitle: 'Caption, tags and advanced settings live here.',
         ),
         const SizedBox(height: 16),
         _buildHeroCard(
@@ -782,8 +967,8 @@ class _PromoteComposerScreenState extends State<PromoteComposerScreen> {
             children: [
               TextField(
                 controller: _captionCtl,
-                maxLines: 6,
-                minLines: 4,
+                maxLines: 5,
+                minLines: 3,
                 style: const TextStyle(color: Colors.white),
                 cursorColor: const Color(0xFFFFD77A),
                 decoration: _fieldDecoration(
@@ -793,141 +978,117 @@ class _PromoteComposerScreenState extends State<PromoteComposerScreen> {
                 ),
               ),
               const SizedBox(height: 14),
-              Row(
-                children: [
-                  Expanded(
-                    child: TextField(
-                      controller: _tagCtl,
-                      style: const TextStyle(color: Colors.white),
-                      cursorColor: const Color(0xFFFFD77A),
-                      onSubmitted: (_) => _addHashtagFromInput(),
-                      decoration: _fieldDecoration(
-                        label: 'Tags',
-                        hint: 'Add hashtag and press enter',
-                        icon: LucideIcons.hash,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  _ActionPill(
-                    label: 'Add',
-                    icon: LucideIcons.plus,
-                    onTap: _addHashtagFromInput,
-                  ),
-                ],
+              _ActionRowCard(
+                icon: LucideIcons.userRoundPlus,
+                title: 'Tag people',
+                subtitle: _peopleTags.isEmpty
+                    ? 'No people tagged yet'
+                    : '${_peopleTags.length} tagged',
+                onTap: _tagPeople,
               ),
-              if (_hashtags.isNotEmpty) ...[
-                const SizedBox(height: 12),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: _hashtags.map((tag) {
-                    return InputChip(
-                      label: Text(tag),
-                      onDeleted: () => setState(() => _hashtags.remove(tag)),
-                      backgroundColor: Colors.white.withValues(alpha: 0.06),
-                      labelStyle: const TextStyle(color: Colors.white),
-                      deleteIconColor: Colors.white70,
-                    );
-                  }).toList(),
-                ),
-              ],
-              const SizedBox(height: 14),
+              const SizedBox(height: 12),
               _LocationCard(
                 title: 'Location',
                 subtitle: _location?.searchText ?? _locationCtl.text.trim(),
                 onTap: _pickLocation,
               ),
               const SizedBox(height: 12),
-              _ToggleCard(
-                title: 'Hide likes count',
-                subtitle: 'Only you can see the like count on this promote.',
-                value: _hideLikes,
-                onChanged: (value) => setState(() => _hideLikes = value),
-              ),
-              const SizedBox(height: 12),
-              _ToggleCard(
-                title: 'Turn off commenting',
-                subtitle: 'Stop comments on this promote once it is live.',
-                value: _turnOffCommenting,
-                onChanged: (value) =>
-                    setState(() => _turnOffCommenting = value),
-              ),
-            ],
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildReviewStep() {
-    final caption = _captionCtl.text.trim();
-    final summary = <String>[
-      '${_media.length} media item(s)',
-      '${_products.length} product(s)',
-      if (caption.isNotEmpty) 'Caption ready',
-      if (_location?.searchText.isNotEmpty ??
-          _locationCtl.text.trim().isNotEmpty)
-        'Location added',
-    ];
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        _buildSectionHeader(
-          title: 'Review and publish',
-          subtitle: 'Double-check everything before we submit the promote.',
-        ),
-        const SizedBox(height: 16),
-        _buildHeroCard(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: summary
-                    .map(
-                      (item) => Chip(
-                        label: Text(item),
-                        backgroundColor: Colors.white.withValues(alpha: 0.06),
-                        labelStyle: const TextStyle(color: Colors.white),
-                        side: BorderSide(
-                          color: Colors.white.withValues(alpha: 0.08),
+              Container(
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.05),
+                  borderRadius: BorderRadius.circular(18),
+                  border: Border.all(
+                    color: Colors.white.withValues(alpha: 0.08),
+                  ),
+                ),
+                clipBehavior: Clip.antiAlias,
+                child: Column(
+                  children: [
+                    InkWell(
+                      onTap: () {
+                        setState(() {
+                          _advancedSettingsOpen = !_advancedSettingsOpen;
+                        });
+                      },
+                      child: Padding(
+                        padding: const EdgeInsets.all(14),
+                        child: Row(
+                          children: [
+                            const Icon(
+                              LucideIcons.settings2,
+                              color: Colors.white70,
+                              size: 20,
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  const Text(
+                                    'Advanced settings',
+                                    style: TextStyle(
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    'Hide likes and comments control',
+                                    style: TextStyle(
+                                      color:
+                                          Colors.white.withValues(alpha: 0.66),
+                                      fontSize: 12.5,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            Icon(
+                              _advancedSettingsOpen
+                                  ? LucideIcons.chevronUp
+                                  : LucideIcons.chevronDown,
+                              color: Colors.white70,
+                            ),
+                          ],
                         ),
                       ),
-                    )
-                    .toList(),
-              ),
-              const SizedBox(height: 14),
-              _ReviewRow(
-                  label: 'Likes hidden', value: _hideLikes ? 'Yes' : 'No'),
-              _ReviewRow(
-                label: 'Comments',
-                value: _turnOffCommenting ? 'Disabled' : 'Enabled',
-              ),
-              _ReviewRow(
-                label: 'Media mix',
-                value: _media.any((item) => item.isVideo) ? 'Video' : 'Image',
-              ),
-              const SizedBox(height: 14),
-              Text(
-                'Products will be uploaded first, followed by the promote post payload.',
-                style: TextStyle(
-                  color: Colors.white.withValues(alpha: 0.7),
-                  fontSize: 12.5,
-                  height: 1.35,
+                    ),
+                    AnimatedCrossFade(
+                      firstChild: const SizedBox.shrink(),
+                      secondChild: Padding(
+                        padding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
+                        child: Column(
+                          children: [
+                            _ToggleCard(
+                              title: 'Hide likes count',
+                              subtitle:
+                                  'Only you can see the like count on this promote.',
+                              value: _hideLikes,
+                              onChanged: (value) =>
+                                  setState(() => _hideLikes = value),
+                            ),
+                            const SizedBox(height: 12),
+                            _ToggleCard(
+                              title: 'Turn off commenting',
+                              subtitle:
+                                  'Stop comments on this promote once it is live.',
+                              value: _turnOffCommenting,
+                              onChanged: (value) =>
+                                  setState(() => _turnOffCommenting = value),
+                            ),
+                          ],
+                        ),
+                      ),
+                      crossFadeState: _advancedSettingsOpen
+                          ? CrossFadeState.showSecond
+                          : CrossFadeState.showFirst,
+                      duration: const Duration(milliseconds: 180),
+                    ),
+                  ],
                 ),
               ),
             ],
           ),
-        ),
-        const SizedBox(height: 16),
-        _ActionPill(
-          label: _isSubmitting ? 'Publishing...' : 'Publish promote',
-          icon: LucideIcons.rocket,
-          onTap: _isSubmitting ? null : _submit,
-          filled: true,
         ),
       ],
     );
@@ -1017,6 +1178,7 @@ class _PromoteComposerScreenState extends State<PromoteComposerScreen> {
   @override
   Widget build(BuildContext context) {
     final canPublish = _media.isNotEmpty && !_isSubmitting;
+    final isFinalStep = _step == _stepTitles.length - 1;
     return Scaffold(
       backgroundColor: const Color(0xFF090909),
       body: SafeArea(
@@ -1055,16 +1217,54 @@ class _PromoteComposerScreenState extends State<PromoteComposerScreen> {
                       ],
                     ),
                   ),
-                  TextButton(
-                    onPressed: canPublish ? _goNext : null,
-                    child: Text(
-                      _step == _stepTitles.length - 1 ? 'Publish' : 'Next',
-                      style: const TextStyle(
-                        color: Color(0xFFFFD77A),
-                        fontWeight: FontWeight.w700,
+                  if (isFinalStep)
+                    Material(
+                      color: Colors.transparent,
+                      child: InkWell(
+                        onTap: canPublish ? _submit : null,
+                        borderRadius: BorderRadius.circular(999),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 14,
+                            vertical: 10,
+                          ),
+                          decoration: BoxDecoration(
+                            gradient: const LinearGradient(
+                              colors: [
+                                Color(0xFFFFD77A),
+                                Color(0xFFB57B17),
+                              ],
+                            ),
+                            borderRadius: BorderRadius.circular(999),
+                          ),
+                          child: const Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(LucideIcons.rocket, size: 16),
+                              SizedBox(width: 8),
+                              Text(
+                                'Publish',
+                                style: TextStyle(
+                                  color: Colors.black,
+                                  fontWeight: FontWeight.w800,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    )
+                  else
+                    TextButton(
+                      onPressed: canPublish ? _goNext : null,
+                      child: const Text(
+                        'Next',
+                        style: TextStyle(
+                          color: Color(0xFFFFD77A),
+                          fontWeight: FontWeight.w700,
+                        ),
                       ),
                     ),
-                  ),
                 ],
               ),
             ),
@@ -1106,7 +1306,7 @@ class _PromoteComposerScreenState extends State<PromoteComposerScreen> {
                         0 => _buildMediaStep(),
                         1 => _buildProductsStep(),
                         2 => _buildDetailsStep(),
-                        _ => _buildReviewStep(),
+                        _ => _buildDetailsStep(),
                       },
                     ),
                   ),
@@ -1182,17 +1382,25 @@ class _PromoteProductEditorScreenState
   }
 
   void _save() {
-    if (_nameCtl.text.trim().isEmpty) {
+    final name = _nameCtl.text.trim();
+    final price = _priceCtl.text.trim();
+    if (name.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Add a product name')),
       );
       return;
     }
+    if (price.isEmpty || num.tryParse(price) == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Add a valid product price')),
+      );
+      return;
+    }
     Navigator.of(context).pop(
       _PromoteDraftProduct(
-        name: _nameCtl.text.trim(),
+        name: name,
         description: _descCtl.text.trim(),
-        price: _priceCtl.text.trim(),
+        price: price,
         discountAmount: _discountCtl.text.trim(),
         visitLink: _linkCtl.text.trim(),
         imagePath: _imagePath,
@@ -1207,11 +1415,13 @@ class _PromoteProductEditorScreenState
     required IconData icon,
     int maxLines = 1,
     TextInputType? keyboardType,
+    ValueChanged<String>? onChanged,
   }) {
     return TextField(
       controller: controller,
       maxLines: maxLines,
       keyboardType: keyboardType,
+      onChanged: onChanged,
       style: const TextStyle(color: Colors.white),
       cursorColor: const Color(0xFFFFD77A),
       decoration: InputDecoration(
@@ -1327,7 +1537,7 @@ class _PromoteProductEditorScreenState
               const SizedBox(height: 16),
               _field(
                 controller: _nameCtl,
-                label: 'Product name',
+                label: 'Product name *',
                 hint: 'Luxury tote bag',
                 icon: LucideIcons.tag,
               ),
@@ -1345,10 +1555,11 @@ class _PromoteProductEditorScreenState
                   Expanded(
                     child: _field(
                       controller: _priceCtl,
-                      label: 'Price',
+                      label: 'Price *',
                       hint: '2499',
                       icon: LucideIcons.indianRupee,
                       keyboardType: TextInputType.number,
+                      onChanged: (_) => setState(() {}),
                     ),
                   ),
                   const SizedBox(width: 12),
@@ -1359,9 +1570,98 @@ class _PromoteProductEditorScreenState
                       hint: '300',
                       icon: LucideIcons.badgePercent,
                       keyboardType: TextInputType.number,
+                      onChanged: (_) => setState(() {}),
                     ),
                   ),
                 ],
+              ),
+              const SizedBox(height: 12),
+              Builder(
+                builder: (context) {
+                  final price = _tryParseAmount(_priceCtl.text) ?? 0;
+                  final discount = _tryParseAmount(_discountCtl.text) ?? 0;
+                  if (price <= 0) {
+                    return const SizedBox.shrink();
+                  }
+                  final finalPrice =
+                      (price - discount).clamp(0, double.infinity).toDouble();
+                  final discountPct = discount > 0 && price > 0
+                      ? ((discount / price) * 100).round()
+                      : 0;
+                  return Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.05),
+                      borderRadius: BorderRadius.circular(18),
+                      border: Border.all(
+                        color: Colors.white.withValues(alpha: 0.08),
+                      ),
+                    ),
+                    child: Row(
+                      children: [
+                        Container(
+                          width: 40,
+                          height: 40,
+                          decoration: BoxDecoration(
+                            color:
+                                const Color(0xFFFFD77A).withValues(alpha: 0.14),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: const Icon(
+                            LucideIcons.badgePercent,
+                            color: Color(0xFFFFD77A),
+                            size: 20,
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Final price',
+                                style: TextStyle(
+                                  color: Colors.white.withValues(alpha: 0.68),
+                                  fontSize: 12,
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                '₹${_formatMoney(finalPrice)}',
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.w800,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        if (discountPct > 0)
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 10,
+                              vertical: 6,
+                            ),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFFFD77A)
+                                  .withValues(alpha: 0.12),
+                              borderRadius: BorderRadius.circular(999),
+                            ),
+                            child: Text(
+                              '$discountPct% off',
+                              style: const TextStyle(
+                                color: Color(0xFFFFD77A),
+                                fontSize: 12,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
+                  );
+                },
               ),
               const SizedBox(height: 12),
               _field(
@@ -1465,9 +1765,7 @@ class _MediaPreviewCard extends StatelessWidget {
                 ),
               ),
               child: Text(
-                media.isVideo
-                    ? 'Trimmed ${media.trimStart != null ? 'yes' : 'no'}'
-                    : 'Ready for upload',
+                media.isVideo ? 'Video ready' : 'Ready for upload',
                 maxLines: 2,
                 style: const TextStyle(
                   color: Colors.white,
@@ -1582,6 +1880,65 @@ class _LocationCard extends StatelessWidget {
   }
 }
 
+class _ActionRowCard extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final VoidCallback onTap;
+
+  const _ActionRowCard({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.white.withValues(alpha: 0.05),
+      borderRadius: BorderRadius.circular(18),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(18),
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Row(
+            children: [
+              const SizedBox(width: 2),
+              Icon(icon, color: Colors.white70, size: 20),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      subtitle,
+                      style: TextStyle(
+                        color: Colors.white.withValues(alpha: 0.68),
+                        fontSize: 12.5,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const Icon(LucideIcons.chevronRight, color: Colors.white54),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _ToggleCard extends StatelessWidget {
   final String title;
   final String subtitle;
@@ -1603,24 +1960,47 @@ class _ToggleCard extends StatelessWidget {
         borderRadius: BorderRadius.circular(18),
         border: Border.all(color: Colors.white.withValues(alpha: 0.06)),
       ),
-      child: SwitchListTile.adaptive(
-        value: value,
-        onChanged: onChanged,
-        title: Text(
-          title,
-          style: const TextStyle(
-            color: Colors.white,
-            fontWeight: FontWeight.w700,
-          ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    subtitle,
+                    style: TextStyle(
+                      color: Colors.white.withValues(alpha: 0.68),
+                      fontSize: 12.5,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 12),
+            Switch(
+              value: value,
+              onChanged: onChanged,
+              activeThumbColor: const Color(0xFFFFD77A),
+              activeTrackColor: const Color(0xFFFFD77A).withValues(alpha: 0.38),
+              inactiveThumbColor: const Color(0xFFB8B8B8),
+              inactiveTrackColor: Colors.white.withValues(alpha: 0.16),
+              trackOutlineColor: WidgetStatePropertyAll(
+                Colors.white.withValues(alpha: 0.05),
+              ),
+            ),
+          ],
         ),
-        subtitle: Text(
-          subtitle,
-          style: TextStyle(
-            color: Colors.white.withValues(alpha: 0.68),
-            fontSize: 12.5,
-          ),
-        ),
-        activeThumbColor: const Color(0xFFFFD77A),
       ),
     );
   }
@@ -1630,22 +2010,15 @@ class _ActionPill extends StatelessWidget {
   final String label;
   final IconData icon;
   final VoidCallback? onTap;
-  final bool filled;
 
   const _ActionPill({
     required this.label,
     required this.icon,
     required this.onTap,
-    this.filled = false,
   });
 
   @override
   Widget build(BuildContext context) {
-    final bg = filled
-        ? const LinearGradient(
-            colors: [Color(0xFFFFD77A), Color(0xFFB57B17)],
-          )
-        : null;
     return Material(
       color: Colors.transparent,
       child: InkWell(
@@ -1654,8 +2027,7 @@ class _ActionPill extends StatelessWidget {
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
           decoration: BoxDecoration(
-            gradient: bg,
-            color: filled ? null : Colors.white.withValues(alpha: 0.05),
+            color: Colors.white.withValues(alpha: 0.05),
             borderRadius: BorderRadius.circular(999),
             border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
           ),
@@ -1665,13 +2037,13 @@ class _ActionPill extends StatelessWidget {
               Icon(
                 icon,
                 size: 16,
-                color: filled ? Colors.black : Colors.white,
+                color: Colors.white,
               ),
               const SizedBox(width: 8),
               Text(
                 label,
-                style: TextStyle(
-                  color: filled ? Colors.black : Colors.white,
+                style: const TextStyle(
+                  color: Colors.white,
                   fontWeight: FontWeight.w700,
                   fontSize: 13,
                 ),
@@ -1770,44 +2142,6 @@ class _ProductPreviewCard extends StatelessWidget {
                 color: Colors.redAccent,
               ),
             ],
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _ReviewRow extends StatelessWidget {
-  final String label;
-  final String value;
-
-  const _ReviewRow({
-    required this.label,
-    required this.value,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 10),
-      child: Row(
-        children: [
-          Expanded(
-            child: Text(
-              label,
-              style: TextStyle(
-                color: Colors.white.withValues(alpha: 0.72),
-                fontSize: 13,
-              ),
-            ),
-          ),
-          Text(
-            value,
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 13,
-              fontWeight: FontWeight.w700,
-            ),
           ),
         ],
       ),

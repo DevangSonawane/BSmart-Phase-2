@@ -36,7 +36,9 @@ class ProfileHomePage extends StatefulWidget {
   final List<FeedPost> posts;
   final List<FeedPost> reels;
   final List<FeedPost> tweets;
+  final List<FeedPost> promotes;
   final VoidCallback? onOpenStories;
+  final Future<void> Function(FeedPost post)? onDeletePromote;
   final VoidCallback? onBack;
   final VoidCallback? onMenu;
   final VoidCallback? onFollow;
@@ -60,7 +62,9 @@ class ProfileHomePage extends StatefulWidget {
     required this.posts,
     required this.reels,
     required this.tweets,
+    required this.promotes,
     required this.onOpenStories,
+    this.onDeletePromote,
     required this.onBack,
     required this.onMenu,
     required this.onFollow,
@@ -98,7 +102,10 @@ class _ProfileHomePageState extends State<ProfileHomePage> {
   List<FeedPost> get posts => widget.posts;
   List<FeedPost> get reels => widget.reels;
   List<FeedPost> get tweets => widget.tweets;
+  List<FeedPost> get promotes => widget.promotes;
   VoidCallback? get onOpenStories => widget.onOpenStories;
+  Future<void> Function(FeedPost post)? get onDeletePromote =>
+      widget.onDeletePromote;
   VoidCallback? get onBack => widget.onBack;
   VoidCallback? get onMenu => widget.onMenu;
   VoidCallback? get onFollow => widget.onFollow;
@@ -939,19 +946,130 @@ class _ProfileHomePageState extends State<ProfileHomePage> {
   }
 
   Widget _buildStoriesTab(BuildContext context) {
-    if (onOpenStories == null) {
+    if (!isMe) {
       return _emptyContentState(
         title: 'Campaigns',
         subtitle: 'Campaign tools will appear here when available.',
         icon: LucideIcons.sparkles,
       );
     }
-    return _emptyContentState(
-      title: 'Campaigns',
-      subtitle: 'Tap below to open your campaign tools.',
-      icon: LucideIcons.sparkles,
-      actionLabel: 'Open Campaigns',
-      onActionTap: onOpenStories,
+    final items = promotes;
+    if (items.isEmpty) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _emptyContentState(
+            title: 'No campaigns yet',
+            subtitle: 'Your uploaded promote reels will appear here.',
+            icon: LucideIcons.sparkles,
+          ),
+          const SizedBox(height: 18),
+          _buildPostsActionCards(context),
+        ],
+      );
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        SizedBox(
+          height: 280,
+          child: ListView.separated(
+            scrollDirection: Axis.horizontal,
+            physics: const BouncingScrollPhysics(),
+            clipBehavior: Clip.none,
+            padding: const EdgeInsets.symmetric(horizontal: 2),
+            itemCount: items.length,
+            itemBuilder: (context, index) {
+              return SizedBox(
+                width: 172,
+                child: _CampaignPromoCard(
+                  post: items[index],
+                  isOwnProfile: isMe,
+                  onMore: onDeletePromote == null
+                      ? null
+                      : () => _showCampaignActions(context, items[index]),
+                  onTap: () => Navigator.of(context)
+                      .pushNamed('/post/${items[index].id}'),
+                ),
+              );
+            },
+            separatorBuilder: (_, __) => const SizedBox(width: 12),
+          ),
+        ),
+        const SizedBox(height: 18),
+        _buildPostsActionCards(context),
+      ],
+    );
+  }
+
+  Future<void> _showCampaignActions(
+    BuildContext context,
+    FeedPost post,
+  ) async {
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (sheetContext) {
+        return SafeArea(
+          child: Container(
+            margin: const EdgeInsets.all(12),
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            decoration: BoxDecoration(
+              color: const Color(0xFF111111),
+              borderRadius: BorderRadius.circular(18),
+              border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                ListTile(
+                  leading: const Icon(Icons.delete_outline, color: Colors.red),
+                  title: const Text(
+                    'Delete campaign',
+                    style: TextStyle(color: Colors.white),
+                  ),
+                  onTap: () async {
+                    Navigator.of(sheetContext).pop();
+                    final confirmed = await showDialog<bool>(
+                          context: context,
+                          builder: (dialogContext) => AlertDialog(
+                            backgroundColor: const Color(0xFF111111),
+                            title: const Text(
+                              'Delete campaign?',
+                              style: TextStyle(color: Colors.white),
+                            ),
+                            content: const Text(
+                              'This campaign will be removed from your profile.',
+                              style: TextStyle(color: Colors.white70),
+                            ),
+                            actions: [
+                              TextButton(
+                                onPressed: () =>
+                                    Navigator.of(dialogContext).pop(false),
+                                child: const Text('Cancel'),
+                              ),
+                              TextButton(
+                                onPressed: () =>
+                                    Navigator.of(dialogContext).pop(true),
+                                child: const Text(
+                                  'Delete',
+                                  style: TextStyle(color: Colors.redAccent),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ) ??
+                        false;
+                    if (!confirmed || onDeletePromote == null) return;
+                    await onDeletePromote!(post);
+                  },
+                ),
+                const SizedBox(height: 8),
+              ],
+            ),
+          ),
+        );
+      },
     );
   }
 
@@ -2045,5 +2163,216 @@ class _PostsActionCard extends StatelessWidget {
         ],
       ),
     );
+  }
+}
+
+class _CampaignPromoCard extends StatelessWidget {
+  final FeedPost post;
+  final bool isOwnProfile;
+  final VoidCallback? onTap;
+  final VoidCallback? onMore;
+
+  const _CampaignPromoCard({
+    required this.post,
+    required this.isOwnProfile,
+    this.onTap,
+    this.onMore,
+  });
+
+  String? _thumbUrl() {
+    final thumb = (post.thumbnailUrl ?? '').trim();
+    if (thumb.isNotEmpty) return thumb;
+    if (post.mediaUrls.isNotEmpty) {
+      final first = post.mediaUrls.first.trim();
+      if (first.isNotEmpty) return first;
+    }
+    return null;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final thumb = _thumbUrl();
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(24),
+        onTap: onTap,
+        child: Container(
+          height: 276,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(26),
+            gradient: const LinearGradient(
+              colors: [Color(0xFF151515), Color(0xFF0D0D0D)],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+            ),
+            border: Border.all(color: Colors.white.withValues(alpha: 0.06)),
+          ),
+          clipBehavior: Clip.antiAlias,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              AspectRatio(
+                aspectRatio: 0.82,
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    if (thumb != null && thumb.isNotEmpty)
+                      SafeNetworkImage(
+                        url: thumb,
+                        fit: BoxFit.cover,
+                        placeholder: Container(
+                          color: const Color(0xFF171717),
+                        ),
+                        errorWidget: Container(
+                          color: const Color(0xFF171717),
+                          child: const Icon(
+                            Icons.broken_image_outlined,
+                            color: Colors.white54,
+                          ),
+                        ),
+                      )
+                    else
+                      Container(
+                        color: const Color(0xFF171717),
+                        child: const Icon(
+                          Icons.campaign_rounded,
+                          color: Colors.white54,
+                          size: 40,
+                        ),
+                      ),
+                    const Positioned.fill(
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            colors: [
+                              Color(0x11000000),
+                              Color(0x66000000),
+                            ],
+                            begin: Alignment.topCenter,
+                            end: Alignment.bottomCenter,
+                          ),
+                        ),
+                      ),
+                    ),
+                    Positioned(
+                      top: 10,
+                      left: 10,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 5,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Colors.black.withValues(alpha: 0.55),
+                          borderRadius: BorderRadius.circular(999),
+                        ),
+                        child: const Text(
+                          'Campaign',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                    ),
+                    if (onMore != null)
+                      Positioned(
+                        top: 6,
+                        right: 6,
+                        child: Material(
+                          color: Colors.black.withValues(alpha: 0.40),
+                          borderRadius: BorderRadius.circular(999),
+                          child: InkWell(
+                            borderRadius: BorderRadius.circular(999),
+                            onTap: onMore,
+                            child: const Padding(
+                              padding: EdgeInsets.all(6),
+                              child: Icon(
+                                Icons.more_horiz_rounded,
+                                color: Colors.white,
+                                size: 18,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(14, 12, 14, 14),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        post.caption?.trim().isNotEmpty == true
+                            ? post.caption!.trim()
+                            : 'Untitled campaign',
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      const Spacer(),
+                      Row(
+                        children: [
+                          const Icon(
+                            Icons.favorite_border_rounded,
+                            size: 15,
+                            color: Colors.white70,
+                          ),
+                          const SizedBox(width: 4),
+                          Text(
+                            _compactCount(post.likes),
+                            style: const TextStyle(
+                              color: Colors.white70,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          const SizedBox(width: 14),
+                          const Icon(
+                            Icons.mode_comment_outlined,
+                            size: 15,
+                            color: Colors.white70,
+                          ),
+                          const SizedBox(width: 4),
+                          Text(
+                            _compactCount(post.comments),
+                            style: const TextStyle(
+                              color: Colors.white70,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  String _compactCount(int value) {
+    if (value >= 1000000) {
+      final n = value / 1000000;
+      return '${n.toStringAsFixed(n >= 10 ? 0 : 1)}M';
+    }
+    if (value >= 1000) {
+      final n = value / 1000;
+      return '${n.toStringAsFixed(n >= 10 ? 0 : 1)}K';
+    }
+    return value.toString();
   }
 }
