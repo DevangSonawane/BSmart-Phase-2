@@ -34,7 +34,8 @@ class UrlHelper {
     if (s == '[]' || s == '{}' || s == '[object Object]') return true;
     if ((s.startsWith('[') && s.endsWith(']')) ||
         (s.startsWith('{') && s.endsWith('}'))) {
-      return !_extractFromObjectLike(s).contains(RegExp(r'https?://|/uploads/'));
+      return !_extractFromObjectLike(s)
+          .contains(RegExp(r'https?://|/uploads/'));
     }
     return false;
   }
@@ -136,7 +137,8 @@ class UrlHelper {
         final uri = Uri.parse(u);
         final host = uri.host.toLowerCase();
         final path = uri.path;
-        final isApiHost = host == 'api.bebsmart.in' || host.startsWith('api.');
+        final isApiHost =
+            host == 'api.bebsmart.online' || host.startsWith('api.');
         if (isApiHost && path.startsWith('/api/uploads/')) {
           return uri.replace(path: path.replaceFirst('/api', '')).toString();
         }

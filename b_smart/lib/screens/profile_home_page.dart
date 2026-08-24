@@ -116,7 +116,14 @@ class _ProfileHomePageState extends State<ProfileHomePage> {
     final source = profile;
     if (source == null) return fallback;
     for (final key in keys) {
-      final value = source[key];
+      dynamic value = source;
+      for (final part in key.split('.')) {
+        if (value is! Map) {
+          value = null;
+          break;
+        }
+        value = value[part];
+      }
       if (value == null) continue;
       final text = value.toString().trim();
       if (text.isNotEmpty) return text;
@@ -190,6 +197,7 @@ class _ProfileHomePageState extends State<ProfileHomePage> {
   String _profession() {
     return _stringValue([
       'profession',
+      'contact.profession',
       'occupation',
       'job_title',
       'designation',

@@ -1322,6 +1322,27 @@ class _ProfileScreenState extends State<ProfileScreen> {
       profile = isMe
           ? await AuthApi().me()
           : await _usersApi.getUserProfile(targetId);
+      if (isMe) {
+        try {
+          final settings = await _usersApi.getAccountSettings();
+          final contact = settings['contact'];
+          if (contact is Map) {
+            final contactMap = Map<String, dynamic>.from(contact);
+            final profession =
+                (contactMap['profession'] ?? contactMap['job_title'])
+                    ?.toString()
+                    .trim();
+            if (profession != null && profession.isNotEmpty) {
+              final currentProfile = profile;
+              profile = {
+                ...currentProfile,
+                'profession': profession,
+                'contact': contactMap,
+              };
+            }
+          }
+        } catch (_) {}
+      }
     } on ForbiddenException catch (e) {
       if (_isPrivacyBlockedError(e)) {
         final preview = _privateProfileFallback(e.body, targetId);
@@ -1410,6 +1431,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         _parsePrivacyRestricted(content?['privacy_restricted']);
     final postsRestricted = privacyRestricted['posts'] == true;
     final pulseRestricted = privacyRestricted['pulse'] == true;
+    final profileData = profile ?? <String, dynamic>{};
     if (mounted) {
       setState(() {
         _profileBlocked = false;
@@ -1420,7 +1442,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
       });
     }
 
-    final isVendor = (profile['role'] as String?)?.toLowerCase() == 'vendor';
+    final isVendor =
+        (profileData['role'] as String?)?.toLowerCase() == 'vendor';
     List<Ad> vendorAds = [];
     if (isVendor && targetId.isNotEmpty) {
       try {
@@ -1852,10 +1875,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
     if (meId != null && meId.isNotEmpty) {
       // Prioritize server-provided follow status if available
-      if ((profile.containsKey('is_followed_by_me') ||
-          profile.containsKey('is_following'))) {
+      if ((profileData.containsKey('is_followed_by_me') ||
+          profileData.containsKey('is_following'))) {
         isFollowedByMe =
-            (profile['is_followed_by_me'] ?? profile['is_following']) == true;
+            (profileData['is_followed_by_me'] ?? profileData['is_following']) ==
+                true;
         // Sync local cache with authoritative server state
         _svc.syncFollowStatus(targetId, isFollowedByMe);
       } else {
@@ -1897,7 +1921,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
       // Determine correct post count:
       // If we received fewer posts than the requested page limit, we know we have the complete list.
       // In that case, trust the actual list length over the potentially stale count from the server.
-      int finalPostsCount = (profile['posts_count'] as int?) ?? posts.length;
+      int finalPostsCount =
+          (profileData['posts_count'] as int?) ?? posts.length;
       if (posts.length < _initialPostsLimit) {
         finalPostsCount = posts.length;
       }
@@ -1905,7 +1930,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       final merged = {
         ...?_profile, // 1. Start with existing local state as fallback
         ...derivedFromPosts, // 2. Update with info derived from posts (if any)
-        ...profile, // 3. Override with fresh API profile data (if success)
+        ...profileData, // 3. Override with fresh API profile data (if success)
         if (vendorInfo != null) 'vendor': vendorInfo,
         'is_followed_by_me': isFollowedByMe,
         'is_requested': isFollowRequested,
@@ -1913,7 +1938,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
         'posts_count': finalPostsCount,
         'followers_count': finalFollowers,
         'following_count': finalFollowing,
-        'wallet_balance': (profile['wallet_balance'] as int?) ?? walletBalance,
+        'wallet_balance':
+            (profileData['wallet_balance'] as int?) ?? walletBalance,
         'account_type': userAccount?.accountType.toString().split('.').last,
         'engagement_score': userAccount?.engagementScore,
       };
