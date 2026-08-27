@@ -1,0 +1,1975 @@
+import 'package:flutter/foundation.dart';
+
+import '../api/api.dart';
+import '../models/ad_model.dart';
+import '../models/feed_page_model.dart';
+import '../models/feed_post_model.dart';
+import '../models/story_model.dart';
+import '../models/user_model.dart';
+import '../utils/location_utils.dart';
+import '../utils/url_helper.dart';
+import 'story_cache.dart';
+import 'supabase_service.dart';
+
+class FeedService {
+  static final FeedService _instance = FeedService._internal();
+  factory FeedService() => _instance;
+
+  FeedService._internal();
+
+  // Client-side rate limiting for feed requests (max 5 per minute).
+  static final _RateLimiter _feedRateLimiter =
+      _RateLimiter(maxRequests: 5, window: const Duration(minutes: 1));
+
+  final PostsApi _postsApi = PostsApi();
+  final AdsApi _adsApi = AdsApi();
+  final PromoteReelsApi _promoteReelsApi = PromoteReelsApi();
+  final AuthApi _authApi = AuthApi();
+  final StoriesApi _storiesApi = StoriesApi();
+
+  // Get personalized feed with ranking
+  List<FeedPost> getPersonalizedFeed({
+    List<String>? followedUserIds,
+    List<String>? userInterests,
+    List<String>? searchHistory,
+  }) {
+    final allPosts = _generateFeedPosts();
+
+    // Rank posts based on relevance
+    final rankedPosts = allPosts.map((post) {
+      double score = 0.0;
+
+      // Follow relationship (high priority)
+      if (followedUserIds != null && followedUserIds.contains(post.userId)) {
+        score += 100.0;
+      }
+
+      // Tagged posts (high priority)
+      if (post.isTagged) {
+        score += 80.0;
+      }
+
+      // Engagement history (liked posts from followed users)
+      if (post.isLiked &&
+          followedUserIds != null &&
+          followedUserIds.contains(post.userId)) {
+        score += 50.0;
+      }
+
+      // Interest matching
+      if (userInterests != null) {
+        final matchingHashtags = post.hashtags
+            .where((tag) => userInterests.any((interest) =>
+                tag.toLowerCase().contains(interest.toLowerCase())))
+            .length;
+        score += matchingHashtags * 10.0;
+      }
+
+      // Search history matching
+      if (searchHistory != null && post.caption != null) {
+        final matchingKeywords = searchHistory
+            .where((keyword) =>
+                post.caption!.toLowerCase().contains(keyword.toLowerCase()))
+            .length;
+        score += matchingKeywords * 5.0;
+      }
+
+      // Recent posts get slight boost
+      final hoursSincePost = DateTime.now().difference(post.createdAt).inHours;
+      score += (24 - hoursSincePost).clamp(0, 24) * 0.5;
+
+      return {'post': post, 'score': score};
+    }).toList();
+
+    // Sort by score (highest first)
+    rankedPosts
+        .sort((a, b) => (b['score'] as double).compareTo(a['score'] as double));
+
+    // Insert ads every 5 posts
+    final finalFeed = <FeedPost>[];
+    for (int i = 0; i < rankedPosts.length; i++) {
+      finalFeed.add(rankedPosts[i]['post'] as FeedPost);
+      if ((i + 1) % 5 == 0 && i < rankedPosts.length - 1) {
+        final ads = _getAds();
+        if (ads.isNotEmpty) {
+          finalFeed.add(ads[i % ads.length]);
+        }
+      }
+    }
+
+    return finalFeed;
+  }
+
+  List<FeedPost> _generateFeedPosts() {
+    final now = DateTime.now();
+    return [
+      FeedPost(
+        id: 'post-1',
+        userId: 'user-2',
+        userName: 'Alice Smith',
+        mediaType: PostMediaType.image,
+        mediaUrls: ['image_url_1'],
+        caption: 'Beautiful sunset today! 🌅 #sunset #nature #photography',
+        hashtags: ['sunset', 'nature', 'photography'],
+        createdAt: now.subtract(const Duration(hours: 2)),
+        likes: 245,
+        comments: 12,
+        isLiked: false,
+        isFollowed: true,
+      ),
+      FeedPost(
+        id: 'post-2',
+        userId: 'user-3',
+        userName: 'Bob Johnson',
+        mediaType: PostMediaType.video,
+        mediaUrls: [
+          'https://flutter.github.io/assets-for-api-docs/assets/videos/bee.mp4'
+        ],
+        thumbnailUrl:
+            'https://images.unsplash.com/photo-1441974231531-c6227db76b6e?w=800&q=80',
+        caption: 'Working on something exciting! 💻 #coding #tech',
+        hashtags: ['coding', 'tech'],
+        createdAt: now.subtract(const Duration(hours: 5)),
+        likes: 189,
+        comments: 8,
+        views: 1200,
+        isLiked: true,
+        isFollowed: true,
+      ),
+      FeedPost(
+        id: 'post-3',
+        userId: 'user-4',
+        userName: 'Emma Wilson',
+        mediaType: PostMediaType.carousel,
+        mediaUrls: [
+          'https://images.unsplash.com/photo-1517841905240-472988babdf9?w=800&q=80',
+          'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?w=800&q=80'
+        ],
+        caption: 'Tagged you in this! @JohnDoe #friends #memories',
+        hashtags: ['friends', 'memories'],
+        createdAt: now.subtract(const Duration(hours: 1)),
+        likes: 156,
+        comments: 5,
+        isLiked: false,
+        isTagged: true,
+      ),
+      FeedPost(
+        id: 'post-4',
+        userId: 'user-5',
+        userName: 'Mike Brown',
+        mediaType: PostMediaType.carousel,
+        mediaUrls: [
+          'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=800&q=80'
+        ],
+        caption: 'Check out my new collection! 🎨 #art #design',
+        hashtags: ['art', 'design'],
+        createdAt: now.subtract(const Duration(hours: 3)),
+        likes: 320,
+        comments: 15,
+        isLiked: false,
+        isFollowed: true,
+      ),
+      FeedPost(
+        id: 'post-5',
+        userId: 'user-6',
+        userName: 'Sarah Davis',
+        mediaType: PostMediaType.reel,
+        mediaUrls: [
+          'https://flutter.github.io/assets-for-api-docs/assets/videos/butterfly.mp4'
+        ],
+        thumbnailUrl:
+            'https://images.unsplash.com/photo-1547153760-18fc86324498?w=800&q=80',
+        caption: 'Quick tutorial! #tutorial #tips',
+        hashtags: ['tutorial', 'tips'],
+        createdAt: now.subtract(const Duration(hours: 4)),
+        likes: 890,
+        comments: 45,
+        views: 5000,
+        isLiked: false,
+        isFollowed: false,
+      ),
+      FeedPost(
+        id: 'post-6',
+        userId: 'user-7',
+        userName: 'David Lee',
+        mediaType: PostMediaType.image,
+        mediaUrls: ['image_url_7'],
+        caption: 'Amazing day at the beach! 🏖️ #beach #summer',
+        hashtags: ['beach', 'summer'],
+        createdAt: now.subtract(const Duration(hours: 6)),
+        likes: 278,
+        comments: 22,
+        isLiked: false,
+      ),
+      FeedPost(
+        id: 'post-7',
+        userId: 'user-8',
+        userName: 'Lisa Chen',
+        isVerified: true,
+        mediaType: PostMediaType.video,
+        mediaUrls: ['video_url_2'],
+        caption: 'New recipe I tried today! 🍰 #food #cooking',
+        hashtags: ['food', 'cooking'],
+        createdAt: now.subtract(const Duration(hours: 8)),
+        likes: 412,
+        comments: 18,
+        views: 2500,
+        isLiked: true,
+      ),
+    ];
+  }
+
+  List<FeedPost> _getAds() {
+    final now = DateTime.now();
+    return [
+      FeedPost(
+        id: 'ad-post-1',
+        userId: 'advertiser-1',
+        userName: 'Sponsored',
+        mediaType: PostMediaType.image,
+        mediaUrls: ['ad_image_1'],
+        caption: 'Special Offer - 50% Off!',
+        createdAt: now.subtract(const Duration(hours: 1)),
+        likes: 0,
+        comments: 0,
+        isAd: true,
+        adTitle: 'Special Offer',
+        adCompanyId: 'company-1',
+        adCompanyName: 'TechCorp',
+        adCategory: 'Electronics',
+        totalBudgetCoins: 5000,
+        targetLocations: const ['All'],
+        targetLanguages: const ['All'],
+      ),
+    ];
+  }
+
+  /// Fetch feed from the REST API backend.
+  ///
+  /// Replaces the previous Supabase-direct `fetchFeedFromBackend`.
+  Future<List<FeedPost>> fetchFeedFromBackend({
+    int limit = 50,
+    int offset = 0,
+    String? currentUserId,
+    bool useBackendDefault = false,
+    String? cacheBuster,
+    bool swallowErrors = true,
+  }) async {
+    Set<String> locallySaved = <String>{};
+    Set<String> followedUsers = <String>{};
+    if (currentUserId != null && currentUserId.isNotEmpty) {
+      final svc = SupabaseService();
+      locallySaved = await svc.getSavedPostIds(currentUserId);
+      followedUsers = await svc.getFollowedUserIds(currentUserId);
+    }
+    try {
+      final page = (offset ~/ limit) + 1;
+      // Debug: log pagination parameters
+      try {
+        // Avoid throwing in debug logging
+        print(
+            'FeedService.fetchFeedFromBackend -> page=$page limit=$limit offset=$offset currentUserId=${currentUserId ?? "(null)"}');
+      } catch (_) {}
+
+      final data = useBackendDefault
+          ? await _rateLimited(
+              () => _postsApi.getFeedDefault(cacheBuster: cacheBuster))
+          : await _rateLimited(
+              () => _postsApi.getFeed(
+                  page: page, limit: limit, cacheBuster: cacheBuster),
+            );
+      List<Map<String, dynamic>> items = [];
+      // Debug: log raw data shape briefly
+      try {
+        if (data is List) {
+          print('PostsApi.getFeed returned List with length=${data.length}');
+        } else if (data is Map) {
+          final count =
+              (data['posts'] is List) ? (data['posts'] as List).length : -1;
+          print('PostsApi.getFeed returned Map; posts length=$count');
+        } else {
+          print(
+              'PostsApi.getFeed returned unexpected type: ${data.runtimeType}');
+        }
+      } catch (_) {}
+      if (data is List) {
+        items = (data).cast<Map<String, dynamic>>();
+      } else if (data is Map) {
+        final map = data;
+        if (map['posts'] is List) {
+          items = (map['posts'] as List).cast<Map<String, dynamic>>();
+        } else if (map['data'] is List) {
+          items = (map['data'] as List).cast<Map<String, dynamic>>();
+        } else if (map['data'] is Map &&
+            (map['data'] as Map)['posts'] is List) {
+          items = ((map['data'] as Map)['posts'] as List)
+              .cast<Map<String, dynamic>>();
+        }
+      }
+
+      final mapped = <FeedPost>[];
+
+      for (final raw in items) {
+        try {
+          final Map<String, dynamic> item =
+              Map<String, dynamic>.from(raw as Map<dynamic, dynamic>);
+
+          int toInt(dynamic v) {
+            if (v is int) return v;
+            if (v is num) return v.toInt();
+            return int.tryParse(v?.toString() ?? '') ?? 0;
+          }
+
+          int? toNullableInt(dynamic v) {
+            if (v == null) return null;
+            if (v is String && v.trim().isEmpty) return null;
+            return toInt(v);
+          }
+
+          final postId = item['_id'] as String? ?? item['id'] as String? ?? '';
+          // The API nests the author info inside `user_id` as a populated object.
+          Map<String, dynamic> user = {};
+          for (final key in [
+            'user_id',
+            'users',
+            'author',
+            'user',
+            'created_by',
+            'creator'
+          ]) {
+            final val = item[key];
+            if (val is Map) {
+              user = Map<String, dynamic>.from(val);
+              break;
+            }
+          }
+
+          final rawLikesAny = (item['likes'] as List<dynamic>?) ??
+              (item['liked_by'] as List<dynamic>?) ??
+              const [];
+          final likesCount = () {
+            final explicit = toNullableInt(
+              item['likesCount'] ??
+                  item['likes_count'] ??
+                  item['likeCount'] ??
+                  item['like_count'],
+            );
+            return explicit ?? rawLikesAny.length;
+          }();
+          bool computedLiked = false;
+          if (currentUserId != null && rawLikesAny.isNotEmpty) {
+            for (final e in rawLikesAny) {
+              if (e is Map) {
+                String? uid = (e['user_id'] as String?) ??
+                    (e['id'] as String?) ??
+                    (e['_id'] as String?);
+                if (uid == null && e['user'] is Map) {
+                  final u = (e['user'] as Map);
+                  uid = (u['id'] as String?) ?? (u['_id'] as String?);
+                }
+                if (uid != null && uid.toString() == currentUserId.toString()) {
+                  computedLiked = true;
+                  break;
+                }
+              } else if (e is String &&
+                  e.toString() == currentUserId.toString()) {
+                computedLiked = true;
+                break;
+              }
+            }
+          }
+          final hasLikesArray = rawLikesAny.isNotEmpty;
+          final isLikedByMe = hasLikesArray
+              ? computedLiked
+              : ((item['is_liked_by_me'] as bool?) ?? false);
+
+          bool isSavedByMe = (item['is_saved_by_me'] as bool?) ?? false;
+          if (!isSavedByMe && currentUserId != null) {
+            final savedBy = (item['saved_by'] as List<dynamic>?) ??
+                (item['bookmarks'] as List<dynamic>?) ??
+                const [];
+            for (final entry in savedBy) {
+              if (entry is String && entry == currentUserId) {
+                isSavedByMe = true;
+                break;
+              }
+              if (entry is Map) {
+                final id = (entry['id'] as String?) ??
+                    (entry['_id'] as String?) ??
+                    (entry['user_id'] as String?);
+                if (id != null && id == currentUserId) {
+                  isSavedByMe = true;
+                  break;
+                }
+              }
+            }
+          }
+          if (!isSavedByMe && locallySaved.isNotEmpty) {
+            if (locallySaved.contains(postId)) {
+              isSavedByMe = true;
+            }
+          }
+
+          final authorId = user['_id'] as String? ??
+              user['id'] as String? ??
+              (item['user_id'] is String ? item['user_id'] as String : '');
+
+          bool isFollowedByMe = (item['is_followed_by_me'] as bool?) ?? false;
+          if (!isFollowedByMe &&
+              followedUsers.isNotEmpty &&
+              authorId.isNotEmpty) {
+            if (followedUsers.contains(authorId)) {
+              isFollowedByMe = true;
+            }
+          }
+
+          final dynamic rawMedia =
+              item['media'] ?? item['images'] ?? item['attachments'];
+          final List<dynamic> media = rawMedia is List
+              ? rawMedia
+              : rawMedia is Map
+                  ? <dynamic>[rawMedia]
+                  : <dynamic>[];
+
+          // Compute a deterministic cache-buster seed so refreshed posts show newest image
+          final updatedSeed = (item['updatedAt'] as String?) ??
+              (item['updated_at'] as String?) ??
+              (item['createdAt'] as String?) ??
+              (item['created_at'] as String?) ??
+              DateTime.now().toIso8601String();
+          String bust(String url) {
+            if (url.isEmpty) return url;
+            try {
+              final uri = Uri.parse(url);
+              final qp = Map<String, String>.from(uri.queryParameters);
+              qp['_v'] = updatedSeed;
+              return uri.replace(queryParameters: qp).toString();
+            } catch (_) {
+              return '$url${url.contains('?') ? '&' : '?'}_v=$updatedSeed';
+            }
+          }
+
+          String? parseFilterName(Map<String, dynamic> map) {
+            final raw = map['filter'];
+            if (raw is String) return raw;
+            if (raw is Map) {
+              final name = raw['name'] ?? raw['filter'] ?? raw['id'];
+              if (name != null) return name.toString();
+            }
+            final direct = map['filterName'] ?? map['filter_name'];
+            if (direct != null) return direct.toString();
+            return null;
+          }
+
+          Map<String, int> parseAdjustments(Map<String, dynamic> map) {
+            final raw = map['adjustments'];
+            if (raw is! Map) return const {};
+            final adj = Map<String, dynamic>.from(raw);
+            int toInt(dynamic v) {
+              if (v is int) return v;
+              if (v is num) return v.round();
+              return int.tryParse(v?.toString() ?? '') ?? 0;
+            }
+
+            final out = <String, int>{};
+            if (adj.containsKey('brightness')) {
+              out['brightness'] = toInt(adj['brightness']);
+            }
+            if (adj.containsKey('contrast')) {
+              out['contrast'] = toInt(adj['contrast']);
+            }
+            if (adj.containsKey('saturation')) {
+              out['saturate'] = toInt(adj['saturation']);
+            }
+            if (adj.containsKey('temperature')) {
+              out['sepia'] = toInt(adj['temperature']);
+            }
+            if (adj.containsKey('fade')) {
+              out['opacity'] = toInt(adj['fade']);
+            }
+            if (adj.containsKey('opacity')) {
+              out['opacity'] = toInt(adj['opacity']);
+            }
+            if (adj.containsKey('vignette')) {
+              out['vignette'] = toInt(adj['vignette']);
+            }
+            if (adj.containsKey('lux')) {
+              out['lux'] = toInt(adj['lux']);
+            }
+            return out;
+          }
+
+          final List<String> mediaUrls = [];
+          final List<String?> mediaFilters = [];
+          final List<Map<String, int>> mediaAdjustments = [];
+          final List<double?> mediaAspectRatios = [];
+          for (final m in media) {
+            String? url;
+            Map<String, dynamic>? map;
+            if (m is String) {
+              url = m;
+            } else if (m is Map) {
+              map = Map<String, dynamic>.from(m);
+              if (map['file'] is Map) {
+                final f = (map['file'] as Map);
+                url = (f['fileUrl'] ?? f['file_url'] ?? f['url'] ?? f['path'])
+                    ?.toString();
+              } else if (map['file'] is String) {
+                url = (map['file'] as String);
+              }
+              url ??= (map['fileUrl'] ??
+                      map['file_url'] ??
+                      map['image'] ??
+                      map['imageUrl'] ??
+                      map['url'] ??
+                      map['file_path'])
+                  ?.toString();
+              if ((url == null || url.isEmpty) && map['fileName'] != null) {
+                final fn = map['fileName'].toString();
+                url = '/uploads/$fn';
+              }
+            }
+            final normalized = UrlHelper.normalizeUrl(url);
+            if (normalized.isEmpty) continue;
+            mediaUrls.add(normalized);
+            if (map != null) {
+              mediaFilters.add(parseFilterName(map));
+              mediaAdjustments.add(parseAdjustments(map));
+              final rawAr = map['aspect_ratio'] ??
+                  map['aspectRatio'] ??
+                  (map['crop'] is Map
+                      ? (map['crop'] as Map)['aspect_ratio']
+                      : null) ??
+                  (map['crop'] is Map
+                      ? (map['crop'] as Map)['aspectRatio']
+                      : null) ??
+                  (map['crop_settings'] is Map
+                      ? (map['crop_settings'] as Map)['aspect_ratio']
+                      : null) ??
+                  (map['crop_settings'] is Map
+                      ? (map['crop_settings'] as Map)['aspectRatio']
+                      : null) ??
+                  (map['width'] is num && map['height'] is num
+                      ? ((map['width'] as num).toDouble() /
+                          (map['height'] as num).toDouble())
+                      : null);
+              double? parsedAr;
+              if (rawAr is num) {
+                final v = rawAr.toDouble();
+                parsedAr = v > 0 ? v : null;
+              } else if (rawAr is String) {
+                final s = rawAr.trim();
+                if (s.isNotEmpty) {
+                  if (s.contains(':') || s.contains('/')) {
+                    final parts = s.split(RegExp(r'[:/]'));
+                    if (parts.length >= 2) {
+                      final a = double.tryParse(parts[0].trim());
+                      final b = double.tryParse(parts[1].trim());
+                      if (a != null && b != null && a > 0 && b > 0) {
+                        parsedAr = a / b;
+                      }
+                    }
+                  }
+                  parsedAr ??= double.tryParse(s);
+                }
+              }
+              mediaAspectRatios.add(
+                parsedAr != null && parsedAr > 0 ? parsedAr : null,
+              );
+            } else {
+              mediaFilters.add(null);
+              mediaAdjustments.add(const {});
+              mediaAspectRatios.add(null);
+            }
+          }
+          if (mediaUrls.isEmpty) {
+            final single = (item['imageUrl'] ??
+                    item['image'] ??
+                    item['fileUrl'] ??
+                    item['file_url'] ??
+                    item['url'] ??
+                    item['file_path'])
+                ?.toString();
+            final normalized = UrlHelper.normalizeUrl(single);
+            if (normalized.isNotEmpty) {
+              mediaUrls.add(normalized);
+              mediaFilters.add(null);
+              mediaAdjustments.add(const {});
+            }
+          }
+          if (mediaUrls.isEmpty) {
+            final single =
+                (item['imageUrl'] ?? item['image'] ?? item['url'])?.toString();
+            if (single != null && single.isNotEmpty) {
+              mediaUrls.add(UrlHelper.normalizeUrl(single));
+              mediaFilters.add(null);
+              mediaAdjustments.add(const {});
+            }
+          }
+
+          final typeStr = ((item['type'] as String?) ??
+                  (item['media_type'] as String?) ??
+                  'post')
+              .toLowerCase();
+          bool hasVideo = false;
+          if (typeStr == 'video' || typeStr == 'reel') {
+            hasVideo = true;
+          }
+          for (final mm in media) {
+            if (mm is Map) {
+              final t = (mm['type'] as String?)?.toLowerCase();
+              if (t == 'video' || t == 'reel') {
+                hasVideo = true;
+                break;
+              }
+              final cand = (mm['fileUrl'] ??
+                      mm['file_url'] ??
+                      mm['url'] ??
+                      mm['file_path'] ??
+                      (mm['file'] is String ? mm['file'] : null) ??
+                      (mm['file'] is Map
+                          ? ((mm['file'] as Map)['url'] ??
+                              (mm['file'] as Map)['fileUrl'])
+                          : null))
+                  ?.toString()
+                  .toLowerCase();
+              if (cand != null &&
+                  (cand.endsWith('.mp4') ||
+                      cand.endsWith('.mov') ||
+                      cand.contains('.m3u8'))) {
+                hasVideo = true;
+                break;
+              }
+            } else if (mm is String) {
+              final s = mm.toLowerCase();
+              if (s.endsWith('.mp4') || s.endsWith('.mov')) {
+                hasVideo = true;
+                break;
+              }
+            }
+          }
+          if (!hasVideo) {
+            for (final url in mediaUrls) {
+              if (_looksLikeVideoUrl(url)) {
+                hasVideo = true;
+                break;
+              }
+            }
+          }
+          PostMediaType mediaType = PostMediaType.image;
+          if (typeStr == 'reel') {
+            mediaType = PostMediaType.reel;
+          } else if (hasVideo) {
+            mediaType = mediaUrls.length == 1
+                ? PostMediaType.reel
+                : PostMediaType.video;
+          } else if (mediaUrls.length > 1) {
+            mediaType = PostMediaType.carousel;
+          }
+
+          String? thumbnailUrl;
+          double? aspectRatio;
+          double? parseAspectRatio(dynamic raw) {
+            if (raw == null) return null;
+            if (raw is num) {
+              final v = raw.toDouble();
+              return v > 0 ? v : null;
+            }
+            if (raw is String) {
+              final s = raw.trim();
+              if (s.isEmpty) return null;
+              if (s.contains(':') || s.contains('/')) {
+                final parts = s.split(RegExp(r'[:/]'));
+                if (parts.length >= 2) {
+                  final a = double.tryParse(parts[0].trim());
+                  final b = double.tryParse(parts[1].trim());
+                  if (a != null && b != null && a > 0 && b > 0) {
+                    return a / b;
+                  }
+                }
+              }
+              final v = double.tryParse(s);
+              return (v != null && v > 0) ? v : null;
+            }
+            return null;
+          }
+
+          if (media.isNotEmpty) {
+            for (final mm in media) {
+              if (mm is! Map) continue;
+              final map = Map<String, dynamic>.from(mm);
+              // Handle thumbnail being String, Map, or List
+              dynamic rawThumb = map['thumbnail'] ??
+                  map['thumbnailUrl'] ??
+                  map['thumbnail_url'] ??
+                  map['thumb'];
+              if (rawThumb is String) {
+                thumbnailUrl = rawThumb;
+              } else if (rawThumb is Map) {
+                thumbnailUrl = (rawThumb['url'] ??
+                        rawThumb['fileUrl'] ??
+                        rawThumb['file_url'] ??
+                        rawThumb['path'])
+                    ?.toString();
+                if ((thumbnailUrl == null || thumbnailUrl.isEmpty) &&
+                    rawThumb['file'] is Map) {
+                  final f = rawThumb['file'] as Map;
+                  thumbnailUrl =
+                      (f['url'] ?? f['fileUrl'] ?? f['file_url'] ?? f['path'])
+                          ?.toString();
+                }
+                if ((thumbnailUrl == null || thumbnailUrl.isEmpty) &&
+                    rawThumb['fileName'] != null) {
+                  thumbnailUrl = '/uploads/${rawThumb['fileName']}';
+                }
+              } else if (rawThumb is List && rawThumb.isNotEmpty) {
+                final t = rawThumb.first;
+                if (t is Map) {
+                  thumbnailUrl =
+                      (t['url'] ?? t['fileUrl'] ?? t['file_url'] ?? t['path'])
+                          ?.toString();
+                  if ((thumbnailUrl == null || thumbnailUrl.isEmpty) &&
+                      t['file'] is Map) {
+                    final f = t['file'] as Map;
+                    thumbnailUrl =
+                        (f['url'] ?? f['fileUrl'] ?? f['file_url'] ?? f['path'])
+                            ?.toString();
+                  }
+                  if ((thumbnailUrl == null || thumbnailUrl.isEmpty) &&
+                      t['fileName'] != null) {
+                    thumbnailUrl = '/uploads/${t['fileName']}';
+                  }
+                } else if (t is String) {
+                  thumbnailUrl = t;
+                }
+              }
+              if (thumbnailUrl == null || thumbnailUrl.isEmpty) {
+                final thumbsAny = map['thumbnails'];
+                if (thumbsAny is List && thumbsAny.isNotEmpty) {
+                  final t = thumbsAny.first;
+                  if (t is Map) {
+                    thumbnailUrl =
+                        (t['url'] ?? t['fileUrl'] ?? t['file_url'] ?? t['path'])
+                            ?.toString();
+                    if ((thumbnailUrl == null || thumbnailUrl.isEmpty) &&
+                        t['fileName'] != null) {
+                      thumbnailUrl = '/uploads/${t['fileName']}';
+                    }
+                  } else if (t is String) {
+                    thumbnailUrl = t;
+                  }
+                }
+              }
+              if ((thumbnailUrl == null || thumbnailUrl.isEmpty)) {
+                final poster = map['poster'] ?? map['image'] ?? map['imageUrl'];
+                if (poster != null) {
+                  thumbnailUrl = poster.toString();
+                }
+              }
+              if (thumbnailUrl != null && thumbnailUrl.isNotEmpty) {
+                thumbnailUrl = UrlHelper.normalizeUrl(thumbnailUrl);
+                if (thumbnailUrl.isNotEmpty) {
+                  break;
+                }
+              }
+            }
+
+            // Parse stored aspect ratio from first media if available
+            final first = media.first;
+            if (first is Map) {
+              final rawAr = first['aspect_ratio'] ??
+                  first['aspectRatio'] ??
+                  (first['crop'] is Map
+                      ? (first['crop'] as Map)['aspect_ratio']
+                      : null) ??
+                  (first['crop_settings'] is Map
+                      ? (first['crop_settings'] as Map)['aspect_ratio']
+                      : null) ??
+                  (first['crop_settings'] is Map
+                      ? (first['crop_settings'] as Map)['aspectRatio']
+                      : null);
+              aspectRatio = parseAspectRatio(rawAr);
+            }
+          }
+
+          // Fallback: post-level thumbnail fields
+          if (thumbnailUrl == null || thumbnailUrl.isEmpty) {
+            final raw = item['thumbnail'] ??
+                item['thumbnail_url'] ??
+                item['thumb'] ??
+                item['poster'];
+            if (raw != null) {
+              thumbnailUrl = UrlHelper.normalizeUrl(raw.toString());
+            }
+          }
+
+          // Fallback: use first image media as thumbnail (if any)
+          if (thumbnailUrl == null || thumbnailUrl.isEmpty) {
+            for (final mm in media) {
+              if (mm is Map) {
+                final t = (mm['type'] as String?)?.toLowerCase();
+                if (t == 'image') {
+                  final cand = (mm['fileUrl'] ??
+                          mm['file_url'] ??
+                          mm['url'] ??
+                          mm['file_path'] ??
+                          (mm['file'] is Map
+                              ? ((mm['file'] as Map)['url'] ??
+                                  (mm['file'] as Map)['fileUrl'])
+                              : null) ??
+                          (mm['file'] is String ? mm['file'] : null))
+                      ?.toString();
+                  if (cand != null && cand.isNotEmpty) {
+                    thumbnailUrl = UrlHelper.normalizeUrl(cand);
+                    break;
+                  }
+                }
+              }
+            }
+          }
+
+          // Fallback: if any mediaUrls are images, use the first as thumbnail.
+          if ((thumbnailUrl == null || thumbnailUrl.isEmpty) &&
+              mediaUrls.isNotEmpty) {
+            for (final url in mediaUrls) {
+              final u = url.toLowerCase();
+              if (u.endsWith('.jpg') ||
+                  u.endsWith('.jpeg') ||
+                  u.endsWith('.png') ||
+                  u.endsWith('.webp') ||
+                  u.endsWith('.gif')) {
+                thumbnailUrl = url;
+                break;
+              }
+            }
+          }
+
+          final itemType =
+              (item['item_type'] ?? item['itemType'] ?? '').toString();
+          final vendorAny = item['vendor_id'] ?? item['vendorId'];
+          final typeLower = itemType.toLowerCase();
+          final isAdItem = typeLower == 'ad' || vendorAny != null;
+          final isTweetItem = typeLower == 'tweet';
+          final isPromoteItem =
+              typeLower == 'promote_reel' || typeLower == 'promote-reel';
+          final vendor = vendorAny is Map
+              ? Map<String, dynamic>.from(vendorAny)
+              : <String, dynamic>{};
+
+          final authorName = (user['username'] ?? item['username'])?.toString();
+          final vendorName = (vendor['business_name'] ??
+                  vendor['name'] ??
+                  vendor['company_name'] ??
+                  vendor['brand_name'])
+              ?.toString();
+          String? resolvedUserName =
+              (isAdItem ? (authorName ?? vendorName) : authorName);
+          if (resolvedUserName == null || resolvedUserName.trim().isEmpty) {
+            final fallback =
+                (user['full_name'] ?? user['name'] ?? item['full_name'])
+                    ?.toString();
+            if (fallback != null && fallback.trim().isNotEmpty) {
+              resolvedUserName = fallback;
+            }
+          }
+          if (resolvedUserName == null || resolvedUserName.trim().isEmpty) {
+            resolvedUserName = vendorName;
+          }
+          resolvedUserName =
+              (resolvedUserName != null && resolvedUserName.trim().isNotEmpty)
+                  ? resolvedUserName.trim()
+                  : 'user';
+          final resolvedFullName = (user['full_name'] as String?) ??
+              (item['full_name'] as String?) ??
+              vendorName;
+
+          String? firstNonEmptyString(Iterable<dynamic> candidates) {
+            for (final c in candidates) {
+              final s = c?.toString();
+              if (s == null) continue;
+              final trimmed = s.trim();
+              if (trimmed.isNotEmpty) return trimmed;
+            }
+            return null;
+          }
+
+          final avatarCandidate = firstNonEmptyString([
+            user['avatar_url'],
+            item['userAvatar'],
+            vendor['logo_url'],
+            vendor['avatar_url'],
+            user['profile_picture'],
+            user['profilePicture'],
+            user['photo_url'],
+            user['photoUrl'],
+            user['photo'],
+            user['image'],
+            user['picture'],
+            item['profile_picture'],
+            item['avatar'],
+          ]);
+          final resolvedAvatar = avatarCandidate != null
+              ? UrlHelper.normalizeUrl(avatarCandidate)
+              : null;
+
+          // Never cache-bust thumbnails — it breaks CachedNetworkImage disk cache
+          // and causes the grey placeholder to show on every render.
+          final bustedThumb = thumbnailUrl != null && thumbnailUrl.isNotEmpty
+              ? thumbnailUrl
+              : null;
+
+          List<Map<String, dynamic>> promoteProducts =
+              const <Map<String, dynamic>>[];
+          if (isPromoteItem) {
+            final rawProducts = item['products'];
+            if (rawProducts is List) {
+              promoteProducts = rawProducts
+                  .whereType<Map>()
+                  .map((p) => Map<String, dynamic>.from(p))
+                  .toList();
+            }
+          }
+
+          final post = FeedPost(
+            id: isPromoteItem ? 'promote-$postId' : postId,
+            userId: authorId,
+            userName: resolvedUserName,
+            fullName: resolvedFullName,
+            userAvatar: resolvedAvatar,
+            isVerified: user['is_verified'] as bool? ?? false,
+            isAuthorPrivate: (() {
+              bool toBool(dynamic v) {
+                if (v is bool) return v;
+                if (v is num) return v != 0;
+                final s = v?.toString().trim().toLowerCase() ?? '';
+                return s == 'true' || s == '1' || s == 'yes';
+              }
+
+              return toBool(
+                user['is_private'] ??
+                    user['isPrivate'] ??
+                    user['private'] ??
+                    item['is_private'] ??
+                    item['isPrivate'] ??
+                    item['private'],
+              );
+            })(),
+            mediaType: mediaType,
+            mediaUrls: mediaUrls,
+            thumbnailUrl: bustedThumb,
+            aspectRatio: aspectRatio,
+            mediaAspectRatios:
+                mediaAspectRatios.isEmpty ? null : mediaAspectRatios,
+            mediaFilters: mediaFilters.isEmpty ? null : mediaFilters,
+            mediaAdjustments:
+                mediaAdjustments.isEmpty ? null : mediaAdjustments,
+            caption: (isTweetItem
+                ? (item['content'] ?? item['caption'])
+                : item['caption']) as String?,
+            hashtags: ((item['tags'] as List<dynamic>?) ?? [])
+                .map((e) => e.toString())
+                .toList(),
+            createdAt: item['createdAt'] is String
+                ? DateTime.parse(item['createdAt'] as String)
+                : (item['created_at'] is String
+                    ? DateTime.tryParse(item['created_at'] as String) ??
+                        DateTime.now()
+                    : DateTime.now()),
+            likes: likesCount,
+            comments: () {
+              final explicit = toNullableInt(
+                item['commentsCount'] ??
+                    item['comments_count'] ??
+                    item['commentCount'] ??
+                    item['comment_count'],
+              );
+              if (explicit != null) return explicit;
+              if (item['comments'] is List) {
+                return (item['comments'] as List).length;
+              }
+              return toInt(item['comments']);
+            }(),
+            views: 0,
+            shares: toInt(
+              item['sharesCount'] ??
+                  item['shares_count'] ??
+                  item['shareCount'] ??
+                  item['share_count'] ??
+                  item['shares'],
+            ),
+            isLiked: isLikedByMe,
+            isSaved: isSavedByMe,
+            isFollowed: isFollowedByMe,
+            isTagged: (item['people_tags'] as List?)?.isNotEmpty ?? false,
+            peopleTags: (item['people_tags'] as List?)
+                ?.map((e) => Map<String, dynamic>.from(e))
+                .toList(),
+            isShared: false,
+            isAd: isAdItem,
+            isTweet: isTweetItem,
+            promotedProducts: promoteProducts,
+            commentsDisabled: item['turn_off_commenting'] ??
+                item['comments_disabled'] ??
+                item['commentsDisabled'] ??
+                false,
+            location: locationLabelFromDynamic(
+              item['location_place'] ??
+                  item['locationPlace'] ??
+                  item['location_data'] ??
+                  item['locationData'] ??
+                  item['location'],
+            ),
+            locationPlace: locationPlaceFromDynamic(
+              item['location_place'] ??
+                  item['locationPlace'] ??
+                  item['location_data'] ??
+                  item['locationData'] ??
+                  item['location'],
+            ),
+            hideLikesCount:
+                item['hide_likes_count'] ?? item['hideLikesCount'] ?? false,
+            adTitle: isAdItem
+                ? (item['title'] as String?) ??
+                    (item['ad_title'] as String?) ??
+                    (item['adTitle'] as String?)
+                : null,
+            latestCommentUser: () {
+              final latest = item['latest_comments'];
+              if (latest is List && latest.isNotEmpty) {
+                final first = latest.first;
+                if (first is Map) {
+                  final u = first['user'];
+                  if (u is Map) {
+                    return (u['username'] ?? u['full_name'])?.toString();
+                  }
+                  return (first['username'] ?? first['user_name'])?.toString();
+                }
+              }
+              final comments = item['comments'];
+              if (comments is List && comments.isNotEmpty) {
+                final first = comments.first;
+                if (first is Map) {
+                  final u = first['user'];
+                  if (u is Map) {
+                    return (u['username'] ?? u['full_name'])?.toString();
+                  }
+                  return (first['username'] ?? first['user_name'])?.toString();
+                }
+              }
+              return null;
+            }(),
+            latestCommentText: () {
+              final latest = item['latest_comments'];
+              if (latest is List && latest.isNotEmpty) {
+                final first = latest.first;
+                if (first is Map) {
+                  return (first['text'] ?? first['content'])?.toString();
+                }
+              }
+              final comments = item['comments'];
+              if (comments is List && comments.isNotEmpty) {
+                final first = comments.first;
+                if (first is Map) {
+                  return (first['text'] ?? first['content'])?.toString();
+                }
+              }
+              return null;
+            }(),
+            rawLikes: rawLikesAny
+                .whereType<Map>()
+                .map((m) => Map<String, dynamic>.from(m))
+                .toList(),
+          );
+
+          mapped.add(post);
+        } catch (_) {
+          // Skip any malformed items so a single bad post doesn't break the feed.
+          continue;
+        }
+      }
+
+      // React web feed dedupes repeated items (backend can return duplicates).
+      // Deduplicate before sorting/injecting ads/promotes so users don't see the
+      // same promote reel multiple times on a single page.
+      String canonicalId(FeedPost p) {
+        var id = p.id.trim();
+        const promoteSlot = '-slot-promote-';
+        final slotIdx = id.indexOf(promoteSlot);
+        if (slotIdx != -1) id = id.substring(0, slotIdx);
+        if (id.startsWith('promote-')) id = id.substring('promote-'.length);
+        return id;
+      }
+
+      // Preserve backend ordering (React parity). Keep the first occurrence of
+      // each (type,id) key and drop duplicates later in the page.
+      final seenKeys = <String>{};
+      final deduped = <FeedPost>[];
+      for (final p in mapped) {
+        final baseId = canonicalId(p);
+        if (baseId.isEmpty) continue;
+        final typeKey = p.isAd
+            ? 'ad'
+            : p.isTweet
+                ? 'tweet'
+                : p.isPromote
+                    ? 'promote_reel'
+                    : 'post';
+        final key = '$typeKey:$baseId';
+        if (seenKeys.contains(key)) continue;
+        seenKeys.add(key);
+        deduped.add(p);
+      }
+
+      List<FeedPost> sponsored = const <FeedPost>[];
+      try {
+        final rawAds = await _adsApi.getFeed();
+        sponsored = _mapAdsToFeedPosts(rawAds);
+      } catch (_) {
+        sponsored = const <FeedPost>[];
+      }
+      if (sponsored.isEmpty) {
+        // Fallback so ads still appear if ads API returns nothing.
+        sponsored = _getAds();
+      }
+
+      final hasPromoteInFeed = deduped.any((p) => p.isPromote);
+      List<FeedPost> promotes = const <FeedPost>[];
+      if (!hasPromoteInFeed) {
+        try {
+          final rawPromotes = await _promoteReelsApi.listPromoteReels(
+            page: 1,
+            limit: 20,
+          );
+          promotes = _mapPromoteReelsToFeedPosts(rawPromotes);
+        } catch (_) {
+          promotes = const <FeedPost>[];
+        }
+      }
+
+      return _injectAdsAndPromotesEveryN(
+        deduped,
+        sponsored,
+        promotes,
+        interval: 5,
+        offset: offset,
+      );
+    } catch (e) {
+      if (!swallowErrors) rethrow;
+      // On any top-level error, fall back to empty list so UI can recover.
+      return [];
+    }
+  }
+
+  List<FeedPost> _mapPromoteReelsToFeedPosts(dynamic raw) {
+    List<dynamic> items = const [];
+    if (raw is List) {
+      items = raw;
+    } else if (raw is Map) {
+      final data = raw['data'];
+      if (data is List) items = data;
+    }
+    if (items.isEmpty) return const <FeedPost>[];
+
+    int toInt(dynamic v) {
+      if (v is int) return v;
+      if (v is num) return v.toInt();
+      return int.tryParse(v?.toString() ?? '') ?? 0;
+    }
+
+    bool toBool(dynamic v) {
+      if (v is bool) return v;
+      if (v is num) return v != 0;
+      if (v is String) {
+        final s = v.trim().toLowerCase();
+        return s == 'true' || s == '1' || s == 'yes';
+      }
+      return false;
+    }
+
+    String str(dynamic v) => (v ?? '').toString().trim();
+
+    DateTime parseDate(dynamic v) {
+      final s = str(v);
+      final dt = DateTime.tryParse(s);
+      return dt ?? DateTime.now();
+    }
+
+    String? pickMediaUrl(Map<String, dynamic> item) {
+      final media = item['media'];
+      if (media is! List || media.isEmpty) return null;
+      final first = media.first;
+      if (first is String) return first;
+      if (first is Map) {
+        final m = Map<String, dynamic>.from(first);
+        return (m['fileUrl'] ?? m['file_url'] ?? m['url'] ?? m['link'])
+            ?.toString();
+      }
+      return null;
+    }
+
+    String? pickThumbnailUrl(Map<String, dynamic> item) {
+      final media = item['media'];
+      if (media is! List || media.isEmpty) return null;
+      final first = media.first;
+      if (first is! Map) return null;
+      final m = Map<String, dynamic>.from(first);
+      dynamic rawThumb = m['thumbnails'] ??
+          m['thumbnail'] ??
+          m['thumbnailUrl'] ??
+          m['thumbnail_url'] ??
+          m['thumb'];
+      if (rawThumb is List && rawThumb.isNotEmpty) rawThumb = rawThumb.first;
+      if (rawThumb is String) return rawThumb;
+      if (rawThumb is Map) {
+        final t = Map<String, dynamic>.from(rawThumb);
+        return (t['fileUrl'] ?? t['file_url'] ?? t['url'] ?? t['path'])
+            ?.toString();
+      }
+      return null;
+    }
+
+    final out = <FeedPost>[];
+    for (final e in items) {
+      if (e is! Map) continue;
+      final item = Map<String, dynamic>.from(e);
+      final id = str(item['_id'] ?? item['id'] ?? item['promote_reel_id']);
+      if (id.isEmpty) continue;
+      final user = item['user_id'] is Map
+          ? Map<String, dynamic>.from(item['user_id'] as Map)
+          : <String, dynamic>{};
+      final userId = str(user['_id'] ?? user['id'] ?? item['user_id']);
+      final userName = str(user['username'] ?? user['full_name'] ?? 'User');
+      final avatar = UrlHelper.normalizeUrl(
+        user['avatar_url'] ??
+            user['profile_picture'] ??
+            user['profilePicture'] ??
+            user['profile_pic'] ??
+            user['avatarUrl'],
+      );
+
+      final mediaUrl = UrlHelper.normalizeUrl(pickMediaUrl(item));
+      if (mediaUrl.isEmpty) continue;
+      final thumb = UrlHelper.normalizeUrl(pickThumbnailUrl(item) ?? '');
+      final productsRaw = item['products'];
+      final products = (productsRaw is List)
+          ? productsRaw
+              .whereType<Map>()
+              .map((p) => Map<String, dynamic>.from(p))
+              .toList()
+          : const <Map<String, dynamic>>[];
+
+      out.add(
+        FeedPost(
+          id: 'promote-$id',
+          userId: userId,
+          userName: userName.isEmpty ? 'User' : userName,
+          userAvatar: avatar.isEmpty ? null : avatar,
+          mediaType: PostMediaType.reel,
+          mediaUrls: [mediaUrl],
+          thumbnailUrl: thumb.isEmpty ? null : thumb,
+          caption: (item['caption'] ?? '').toString(),
+          hashtags: ((item['tags'] as List?) ?? const [])
+              .map((t) => t.toString())
+              .toList(),
+          createdAt: parseDate(item['created_at'] ?? item['createdAt']),
+          likes: toInt(item['likes_count'] ?? item['likesCount']),
+          comments: toInt(item['comments_count'] ?? item['commentsCount']),
+          shares: 0,
+          views: 0,
+          isLiked: toBool(item['is_liked_by_me']),
+          isSaved: toBool(item['is_saved_by_me']),
+          isFollowed: toBool(item['is_followed_by_me']),
+          isAd: false,
+          promotedProducts: products,
+        ),
+      );
+    }
+    return out;
+  }
+
+  List<FeedPost> _injectAdsAndPromotesEveryN(
+    List<FeedPost> posts,
+    List<FeedPost> ads,
+    List<FeedPost> promotes, {
+    required int interval,
+    required int offset,
+  }) {
+    if (interval <= 0) return posts;
+
+    bool isInjectedPromote(FeedPost p) {
+      final id = p.id;
+      // Only treat *slot* items as injected; backend may return promote reels
+      // natively as `promote-<id>`, which should remain in the base feed.
+      return id.contains('-slot-promote-');
+    }
+
+    final basePosts =
+        posts.where((p) => !p.isAd && !isInjectedPromote(p)).toList();
+
+    final adPool = <FeedPost>[];
+    final seenAdIds = <String>{};
+    for (final a in ads) {
+      if (a.id.isEmpty || seenAdIds.contains(a.id)) continue;
+      adPool.add(a);
+      seenAdIds.add(a.id);
+    }
+    for (final p in posts.where((p) => p.isAd)) {
+      if (p.id.isEmpty || seenAdIds.contains(p.id)) continue;
+      adPool.add(p);
+      seenAdIds.add(p.id);
+    }
+
+    final promotePool = <FeedPost>[];
+    final seenPromoteIds = <String>{};
+    for (final pr in promotes) {
+      if (pr.id.isEmpty) continue;
+      if (seenPromoteIds.contains(pr.id)) continue;
+      promotePool.add(pr);
+      seenPromoteIds.add(pr.id);
+    }
+    for (final pr in posts.where(isInjectedPromote)) {
+      if (pr.id.isEmpty) continue;
+      if (seenPromoteIds.contains(pr.id)) continue;
+      promotePool.add(pr);
+      seenPromoteIds.add(pr.id);
+    }
+
+    if (adPool.isEmpty && promotePool.isEmpty) return posts;
+
+    final merged = <FeedPost>[];
+    // Avoid repeating the same injected ad/promote at the start of every page
+    // by seeding indices from pagination offset.
+    final injectionSeed = interval > 0 ? (offset ~/ interval) : 0;
+    var adIndex = adPool.isNotEmpty ? (injectionSeed % adPool.length) : 0;
+    var promoteIndex =
+        promotePool.isNotEmpty ? (injectionSeed % promotePool.length) : 0;
+    for (var i = 0; i < basePosts.length; i++) {
+      merged.add(basePosts[i]);
+      final globalIndex = offset + i + 1;
+      if (globalIndex % interval == 0 && i < basePosts.length - 1) {
+        if (adPool.isNotEmpty) {
+          final ad = adPool[adIndex % adPool.length];
+          merged.add(ad.copyWith(id: '${ad.id}-slot-$globalIndex'));
+          adIndex += 1;
+        }
+        if (promotePool.isNotEmpty) {
+          final pr = promotePool[promoteIndex % promotePool.length];
+          merged.add(pr.copyWith(id: '${pr.id}-slot-promote-$globalIndex'));
+          promoteIndex += 1;
+        }
+      }
+    }
+    return merged;
+  }
+
+  Future<T> _rateLimited<T>(Future<T> Function() task) async {
+    await _feedRateLimiter.acquire();
+    return task();
+  }
+
+  /// Fetch a single paginated feed page with metadata.
+  ///
+  /// This uses the backend page/limit params and infers `hasMore`
+  /// when the response does not include pagination metadata.
+  Future<FeedPage> fetchFeedPage({
+    int page = 1,
+    int limit = 10,
+    String? currentUserId,
+    bool useBackendDefault = false,
+    String? cacheBuster,
+  }) async {
+    final safePage = page < 1 ? 1 : page;
+    final offset = (safePage - 1) * limit;
+    final posts = await fetchFeedFromBackend(
+      limit: limit,
+      offset: offset,
+      currentUserId: currentUserId,
+      useBackendDefault: useBackendDefault,
+      cacheBuster: cacheBuster,
+      swallowErrors: false,
+    );
+
+    final hasMore = posts.length >= limit;
+    return FeedPage(
+      posts: posts,
+      page: safePage,
+      limit: limit,
+      hasMore: hasMore,
+      nextCursor: null,
+      total: null,
+    );
+  }
+
+  List<FeedPost> _mapAdsToFeedPosts(List<Map<String, dynamic>> rawAds) {
+    final ads = <FeedPost>[];
+
+    for (final raw in rawAds) {
+      try {
+        final ad = Ad.fromApi(Map<String, dynamic>.from(raw));
+        if (ad.id.isEmpty) continue;
+
+        final primaryUrl = UrlHelper.normalizeUrl(
+          (ad.videoUrl != null && ad.videoUrl!.isNotEmpty)
+              ? ad.videoUrl!
+              : (ad.imageUrl ?? ''),
+        );
+        if (primaryUrl.isEmpty) continue;
+
+        final isVideo = primaryUrl.toLowerCase().endsWith('.mp4') ||
+            primaryUrl.toLowerCase().endsWith('.mov') ||
+            (ad.videoUrl != null && ad.videoUrl!.isNotEmpty);
+        final mediaType = isVideo ? PostMediaType.video : PostMediaType.image;
+        final caption = (ad.caption?.trim().isNotEmpty ?? false)
+            ? ad.caption!.trim()
+            : ((ad.description.trim().isNotEmpty)
+                ? ad.description.trim()
+                : ad.title);
+
+        final ownerName = (ad.vendorBusinessName?.trim().isNotEmpty ?? false)
+            ? ad.vendorBusinessName!.trim()
+            : ((ad.companyName.trim().isNotEmpty)
+                ? ad.companyName.trim()
+                : 'Sponsored');
+
+        ads.add(
+          FeedPost(
+            id: ad.id,
+            userId: ad.userId ?? ad.companyId,
+            userName: ownerName,
+            fullName: null,
+            userAvatar:
+                UrlHelper.normalizeUrl(ad.userAvatarUrl ?? ad.companyLogo),
+            mediaType: mediaType,
+            mediaUrls: [primaryUrl],
+            thumbnailUrl: isVideo ? UrlHelper.normalizeUrl(ad.imageUrl) : null,
+            aspectRatio: _extractMediaAspectFromRawAd(raw),
+            caption: caption,
+            hashtags: ad.hashtags,
+            createdAt: ad.createdAt,
+            likes: ad.likesCount,
+            comments: ad.commentsCount,
+            isAd: true,
+            adTitle: ad.title,
+            adCompanyId: ad.companyId,
+            adCompanyName: ad.companyName,
+            adCategory: ad.category,
+            totalBudgetCoins: ad.totalBudgetCoins,
+            targetLocations: ad.targetLocations,
+            targetLanguages: ad.targetLanguages,
+          ),
+        );
+      } catch (_) {
+        continue;
+      }
+    }
+
+    return ads;
+  }
+
+  List<FeedPost> _injectSingleSponsoredPost(
+    List<FeedPost> posts,
+    List<FeedPost> ads,
+  ) {
+    if (posts.any((p) => p.isAd)) return posts;
+    if (ads.isEmpty) return posts;
+    final selected = ads.first;
+    if (posts.isEmpty) return [selected];
+
+    final insertAt = posts.length >= 2 ? 2 : posts.length;
+    final merged = List<FeedPost>.from(posts);
+    merged.insert(
+      insertAt,
+      selected.copyWith(id: '${selected.id}-slot-home'),
+    );
+    return merged;
+  }
+
+  List<FeedPost> _injectAdsEveryN(
+    List<FeedPost> posts,
+    List<FeedPost> ads, {
+    required int interval,
+    required int offset,
+  }) {
+    if (interval <= 0) return posts;
+
+    final basePosts = posts.where((p) => !p.isAd).toList();
+    final pool = <FeedPost>[];
+    final seenAdIds = <String>{};
+    for (final a in ads) {
+      if (a.id.isEmpty || seenAdIds.contains(a.id)) continue;
+      pool.add(a);
+      seenAdIds.add(a.id);
+    }
+    for (final p in posts.where((p) => p.isAd)) {
+      if (p.id.isEmpty || seenAdIds.contains(p.id)) continue;
+      pool.add(p);
+      seenAdIds.add(p.id);
+    }
+    if (pool.isEmpty) return posts;
+
+    final merged = <FeedPost>[];
+    var adIndex = 0;
+    for (var i = 0; i < basePosts.length; i++) {
+      merged.add(basePosts[i]);
+      final globalIndex = offset + i + 1; // 1-based position in feed
+      if (globalIndex % interval == 0 && i < basePosts.length - 1) {
+        final ad = pool[adIndex % pool.length];
+        merged.add(ad.copyWith(id: '${ad.id}-slot-$globalIndex'));
+        adIndex += 1;
+      }
+    }
+    return merged;
+  }
+
+  double? _extractMediaAspectFromRawAd(Map<String, dynamic> raw) {
+    final media = raw['media'];
+    if (media is! List || media.isEmpty) return null;
+    final first = media.first;
+    if (first is! Map) return null;
+    final map = Map<String, dynamic>.from(first);
+    final rawAr = map['aspect_ratio'] ??
+        map['aspectRatio'] ??
+        (map['crop'] is Map ? (map['crop'] as Map)['aspect_ratio'] : null);
+    if (rawAr is num) {
+      final value = rawAr.toDouble();
+      return value > 0 ? value : null;
+    }
+    if (rawAr is String) {
+      final value = double.tryParse(rawAr);
+      if (value != null && value > 0) return value;
+    }
+    return null;
+  }
+
+  bool _looksLikeVideoUrl(String url) {
+    if (url.isEmpty) return false;
+    final uri = Uri.tryParse(url);
+    final path = (uri?.path ?? url).toLowerCase();
+    return path.endsWith('.m3u8') ||
+        path.endsWith('.mp4') ||
+        path.endsWith('.mov') ||
+        path.endsWith('.avi') ||
+        path.endsWith('.mkv') ||
+        path.endsWith('.webm');
+  }
+
+  String _extractStoryMediaUrl(dynamic rawMedia) {
+    dynamic raw = rawMedia;
+    if (raw is List && raw.isNotEmpty) {
+      raw = raw.first;
+    }
+    if (raw is Map) {
+      final map = Map<String, dynamic>.from(raw);
+      final candidates = [
+        map['url'],
+        map['fileUrl'],
+        map['file_url'],
+        map['imageUrl'],
+        map['image_url'],
+        map['path'],
+        map['link'],
+      ];
+      for (final candidate in candidates) {
+        final resolved = UrlHelper.normalizeUrl(candidate?.toString());
+        if (resolved.isNotEmpty) return resolved;
+      }
+    } else if (raw is String) {
+      return UrlHelper.normalizeUrl(raw);
+    }
+    return '';
+  }
+
+  String _extractStoryThumbnailUrl(dynamic rawMedia) {
+    dynamic raw = rawMedia;
+    if (raw is List && raw.isNotEmpty) {
+      raw = raw.first;
+    }
+    if (raw is Map) {
+      final map = Map<String, dynamic>.from(raw);
+      final candidates = [
+        map['thumbnailUrl'],
+        map['thumbnail_url'],
+        map['thumbnail'],
+        map['thumb'],
+        map['poster'],
+        map['image'],
+        map['imageUrl'],
+        map['image_url'],
+      ];
+      for (final candidate in candidates) {
+        if (candidate is Map) {
+          final nested = Map<String, dynamic>.from(candidate);
+          final nestedCandidates = [
+            nested['url'],
+            nested['fileUrl'],
+            nested['file_url'],
+            nested['path'],
+          ];
+          for (final nestedCandidate in nestedCandidates) {
+            final resolved =
+                UrlHelper.normalizeUrl(nestedCandidate?.toString());
+            if (resolved.isNotEmpty) return resolved;
+          }
+        } else {
+          final resolved = UrlHelper.normalizeUrl(candidate?.toString());
+          if (resolved.isNotEmpty) return resolved;
+        }
+      }
+      final thumbs = map['thumbnails'];
+      if (thumbs is List && thumbs.isNotEmpty) {
+        final first = thumbs.first;
+        if (first is Map) {
+          final firstMap = Map<String, dynamic>.from(first);
+          final nestedCandidates = [
+            firstMap['url'],
+            firstMap['fileUrl'],
+            firstMap['file_url'],
+            firstMap['path'],
+          ];
+          for (final nestedCandidate in nestedCandidates) {
+            final resolved =
+                UrlHelper.normalizeUrl(nestedCandidate?.toString());
+            if (resolved.isNotEmpty) return resolved;
+          }
+        } else {
+          final resolved = UrlHelper.normalizeUrl(first?.toString());
+          if (resolved.isNotEmpty) return resolved;
+        }
+      }
+    }
+    return '';
+  }
+
+  StoryMediaType _storyMediaType(Map<String, dynamic>? media, String mediaUrl) {
+    final raw = (media?['type'] as String?)?.toLowerCase();
+    final isVideo = raw == 'video' ||
+        raw == 'video/mp4' ||
+        raw == 'application/x-mpegurl' ||
+        raw == 'application/vnd.apple.mpegurl' ||
+        _looksLikeVideoUrl(mediaUrl);
+    final isImage = raw == 'image' || (raw?.startsWith('image/') ?? false);
+    if (isVideo) return StoryMediaType.video;
+    if (isImage) return StoryMediaType.image;
+    return StoryMediaType.image;
+  }
+
+  String _resolveStoryUserName(
+    Map<String, dynamic>? user,
+    Map<String, dynamic>? fallback,
+  ) {
+    String? pick(dynamic value) {
+      final text = value?.toString().trim();
+      return (text == null || text.isEmpty) ? null : text;
+    }
+
+    final candidates = <dynamic>[
+      user?['username'],
+      user?['user_name'],
+      user?['full_name'],
+      user?['name'],
+      user?['display_name'],
+      user?['handle'],
+      fallback?['username'],
+      fallback?['user_name'],
+      fallback?['full_name'],
+      fallback?['name'],
+      fallback?['display_name'],
+      fallback?['handle'],
+    ];
+    for (final candidate in candidates) {
+      final resolved = pick(candidate);
+      if (resolved != null) return resolved;
+    }
+    return 'User';
+  }
+
+  // Get stories for online users
+  List<StoryGroup> getStories() {
+    return [];
+  }
+
+  /// Fetch stories feed from backend and map to [StoryGroup]s.
+  Future<List<StoryGroup>> fetchStoriesFeed() async {
+    final feed = await _storiesApi.feed();
+    final groups = feed.map<StoryGroup>((item) {
+      final Map data = item as Map;
+      final user = data['user'] as Map<String, dynamic>? ?? {};
+      final preview = data['preview_item'] as Map<String, dynamic>? ?? {};
+      final seen = (data['seen'] as bool?) ?? false;
+      final storyId = (data['_id'] as String?) ?? (data['id'] as String?);
+      final previewUserId = (preview['user_id'] as String?) ?? '';
+      final rawMedia = preview['media'];
+      Map<String, dynamic>? media;
+      if (rawMedia is List && rawMedia.isNotEmpty && rawMedia.first is Map) {
+        media = Map<String, dynamic>.from(rawMedia.first as Map);
+      } else if (rawMedia is Map) {
+        media = Map<String, dynamic>.from(rawMedia);
+      }
+      final mediaUrl = _extractStoryMediaUrl(rawMedia);
+      final thumbnailUrl = _extractStoryThumbnailUrl(rawMedia);
+      final mediaType = _storyMediaType(media, mediaUrl);
+      debugPrint(
+        '[FeedService] story feed preview storyId=$storyId itemId=${preview['_id'] ?? preview['id'] ?? ''} '
+        'mediaType=${mediaType.name} mediaUrl=$mediaUrl thumbnailUrl=$thumbnailUrl rawMediaType=${rawMedia.runtimeType}',
+      );
+      return StoryGroup(
+        userId: previewUserId.isNotEmpty
+            ? previewUserId
+            : (user['_id'] as String?) ?? (user['id'] as String?) ?? 'unknown',
+        userName: _resolveStoryUserName(user, preview),
+        userAvatar: user['avatar_url'] as String?,
+        isOnline: true,
+        isCloseFriend: false,
+        isSubscribedCreator: false,
+        storyId: storyId,
+        stories: preview.isEmpty || mediaUrl.isEmpty
+            ? <Story>[]
+            : <Story>[
+                Story(
+                  id: (preview['_id'] as String?) ?? 'item',
+                  userId: previewUserId.isNotEmpty
+                      ? previewUserId
+                      : (user['_id'] as String?) ??
+                          (user['id'] as String?) ??
+                          '',
+                  userName: _resolveStoryUserName(user, preview),
+                  userAvatar: user['avatar_url'] as String?,
+                  mediaUrl: mediaUrl,
+                  thumbnailUrl: thumbnailUrl.isEmpty ? null : thumbnailUrl,
+                  mediaType: mediaType,
+                  createdAt: DateTime.tryParse(
+                          preview['createdAt'] as String? ?? '') ??
+                      DateTime.now(),
+                  views: (data['views_count'] as int?) ?? 0,
+                  isViewed: seen,
+                  expiresAt:
+                      DateTime.tryParse(preview['expiresAt'] as String? ?? ''),
+                  isDeleted: (preview['isDeleted'] as bool?) ?? false,
+                ),
+              ],
+      );
+    }).toList();
+
+    // Sort so that:
+    // - Users with unseen stories come first
+    // - Within each group, preview uses latest story
+    groups.sort((a, b) {
+      final aStory = a.stories.isNotEmpty ? a.stories.first : null;
+      final bStory = b.stories.isNotEmpty ? b.stories.first : null;
+
+      final aSeen = aStory?.isViewed ?? false;
+      final bSeen = bStory?.isViewed ?? false;
+      if (aSeen != bSeen) {
+        return aSeen ? 1 : -1; // unseen first
+      }
+
+      final ad = aStory?.createdAt ?? DateTime.fromMillisecondsSinceEpoch(0);
+      final bd = bStory?.createdAt ?? DateTime.fromMillisecondsSinceEpoch(0);
+      return bd.compareTo(ad); // newest first
+    });
+
+    return groups;
+  }
+
+  /// Fetch all items for a specific story.
+  Future<List<Story>> fetchStoryItems(String storyId,
+      {String? ownerUserName, String? ownerAvatar}) async {
+    final rawItems = await _storiesApi.items(storyId);
+    final items = List<Map<String, dynamic>>.from(
+        rawItems.map((e) => Map<String, dynamic>.from(e as Map)));
+
+    items.sort((a, b) {
+      final ad = DateTime.tryParse(
+              a['createdAt'] as String? ?? a['created_at'] as String? ?? '') ??
+          DateTime.fromMillisecondsSinceEpoch(0);
+      final bd = DateTime.tryParse(
+              b['createdAt'] as String? ?? b['created_at'] as String? ?? '') ??
+          DateTime.fromMillisecondsSinceEpoch(0);
+      // Oldest first so that the latest story is viewed last
+      return ad.compareTo(bd);
+    });
+
+    return items.map<Story>((m) {
+      final rawMedia = m['media'];
+      Map<String, dynamic>? media;
+      if (rawMedia is List && rawMedia.isNotEmpty && rawMedia.first is Map) {
+        media = Map<String, dynamic>.from(rawMedia.first as Map);
+      } else if (rawMedia is Map) {
+        media = Map<String, dynamic>.from(rawMedia);
+      }
+      final mediaUrl = _extractStoryMediaUrl(rawMedia);
+      final thumbnailUrl = _extractStoryThumbnailUrl(rawMedia);
+      final mediaType = _storyMediaType(media, mediaUrl);
+      final texts = (m['texts'] is List)
+          ? (m['texts'] as List)
+              .whereType<Map>()
+              .map((e) => Map<String, dynamic>.from(e))
+              .toList()
+          : null;
+      final mentions = (m['mentions'] is List)
+          ? (m['mentions'] as List)
+              .whereType<Map>()
+              .map((e) => Map<String, dynamic>.from(e))
+              .toList()
+          : null;
+      final transform = (m['transform'] is Map)
+          ? Map<String, dynamic>.from(m['transform'] as Map)
+          : null;
+      final filter = (m['filter'] is Map)
+          ? Map<String, dynamic>.from(m['filter'] as Map)
+          : null;
+      final int? durationSec = (media?['durationSec'] is int)
+          ? (media?['durationSec'] as int)
+          : (m['durationSec'] as int?);
+      final rawId = m['_id'] ?? m['id'];
+      final id = rawId == null ? '' : rawId.toString();
+      final cachedLiked = _boolFromAny(
+            m['liked'] ??
+                m['is_liked'] ??
+                m['liked_by_me'] ??
+                m['is_liked_by_me'],
+          ) ??
+          _boolFromAny(
+            StoryCache.getById(id)?['liked'] ??
+                StoryCache.getById(id)?['is_liked'] ??
+                StoryCache.getById(id)?['liked_by_me'] ??
+                StoryCache.getById(id)?['is_liked_by_me'],
+          );
+      final cachedPayload = <String, dynamic>{
+        ...m,
+        if (cachedLiked != null) ...{
+          'liked': cachedLiked,
+          'is_liked': cachedLiked,
+          'liked_by_me': cachedLiked,
+          'is_liked_by_me': cachedLiked,
+        },
+      };
+      StoryCache.putById(id, cachedPayload);
+      debugPrint(
+        '[FeedService] story item storyId=$storyId itemId=$id '
+        'mediaType=${mediaType.name} mediaUrl=$mediaUrl thumbnailUrl=$thumbnailUrl rawMediaType=${rawMedia.runtimeType} '
+        'texts=${texts?.length ?? 0} mentions=${mentions?.length ?? 0}',
+      );
+      return Story(
+        id: id.isNotEmpty ? id : 'item',
+        userId: (m['user_id'] as String?) ?? '',
+        userName: (ownerUserName != null && ownerUserName.trim().isNotEmpty)
+            ? ownerUserName.trim()
+            : _resolveStoryUserName(
+                (m['user'] is Map)
+                    ? Map<String, dynamic>.from(m['user'] as Map)
+                    : null,
+                m,
+              ),
+        userAvatar: ownerAvatar,
+        mediaUrl: mediaUrl,
+        thumbnailUrl: thumbnailUrl.isEmpty ? null : thumbnailUrl,
+        mediaType: mediaType,
+        createdAt: DateTime.tryParse(m['createdAt'] as String? ?? '') ??
+            DateTime.now(),
+        views: 0,
+        isViewed: false,
+        expiresAt: DateTime.tryParse(m['expiresAt'] as String? ?? ''),
+        isDeleted: (m['isDeleted'] as bool?) ?? false,
+        texts: texts,
+        mentions: mentions,
+        transform: transform,
+        filter: filter,
+        durationSec: durationSec,
+      );
+    }).toList();
+  }
+
+  /// Mark an item as viewed.
+  Future<void> markItemViewed(String itemId) async {
+    await _storiesApi.viewItem(itemId);
+  }
+
+  bool? _boolFromAny(dynamic value) {
+    if (value is bool) return value;
+    if (value is num) return value != 0;
+    if (value is String) {
+      final normalized = value.trim().toLowerCase();
+      if (normalized.isEmpty) return null;
+      if (['true', '1', 'yes', 'y'].contains(normalized)) return true;
+      if (['false', '0', 'no', 'n'].contains(normalized)) return false;
+    }
+    return null;
+  }
+
+  // Get current user for profile icon
+  User getCurrentUser() {
+    // Will be populated after fetching /auth/me.
+    // Return a placeholder; the caller should use AuthService.fetchCurrentUser() instead.
+    return User(
+      id: 'unknown',
+      name: 'User',
+      email: '',
+    );
+  }
+
+  /// Fetch the current user from the REST API.
+  Future<User> fetchCurrentUser() async {
+    try {
+      final data = await _authApi.me();
+      return User(
+        id: data['id'] as String? ?? data['_id'] as String? ?? 'unknown',
+        name: data['full_name'] as String? ??
+            data['username'] as String? ??
+            'User',
+        email: data['email'] as String? ?? '',
+        avatarUrl: data['avatar_url'] as String?,
+        username: data['username'] as String?,
+      );
+    } catch (_) {
+      return User(id: 'unknown', name: 'User', email: '');
+    }
+  }
+
+  // Like/Unlike post
+  FeedPost toggleLike(FeedPost post) {
+    return post.copyWith(
+      isLiked: !post.isLiked,
+      likes: post.isLiked ? post.likes - 1 : post.likes + 1,
+    );
+  }
+
+  // Save/Unsave post
+  FeedPost toggleSave(FeedPost post) {
+    return post.copyWith(isSaved: !post.isSaved);
+  }
+
+  // Follow/Unfollow user
+  FeedPost toggleFollow(FeedPost post) {
+    return post.copyWith(isFollowed: !post.isFollowed);
+  }
+}
+
+class _RateLimiter {
+  final int maxRequests;
+  final Duration window;
+  final List<DateTime> _hits = <DateTime>[];
+  Future<void> _serial = Future<void>.value();
+
+  _RateLimiter({required this.maxRequests, required this.window});
+
+  Future<void> acquire() {
+    _serial = _serial.then((_) async {
+      final now = DateTime.now();
+      _hits.removeWhere((t) => now.difference(t) > window);
+      if (_hits.length < maxRequests) {
+        _hits.add(now);
+        return;
+      }
+      final earliest = _hits.first;
+      final waitFor = window - now.difference(earliest);
+      if (waitFor.inMilliseconds > 0) {
+        await Future<void>.delayed(waitFor);
+      }
+      final afterWait = DateTime.now();
+      _hits.removeWhere((t) => afterWait.difference(t) > window);
+      _hits.add(afterWait);
+    });
+    return _serial;
+  }
+}

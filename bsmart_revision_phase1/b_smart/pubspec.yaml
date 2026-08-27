@@ -1,0 +1,108 @@
+name: b_smart
+description: "A new Flutter project."
+publish_to: 'none'
+
+version: 1.0.0+4
+
+environment:
+  sdk: ">=3.3.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  cupertino_icons: ^1.0.8
+  lucide_icons_flutter: ^3.1.9
+
+  # Auth & Backend
+  jwt_decoder: ^2.0.1
+  crypto: ^3.0.3
+  flutter_secure_storage: ^9.2.2
+  http: ^1.2.1
+  webview_flutter: ^4.8.0
+  webview_flutter_android: 4.10.11 # Pinned to avoid build error in 4.10.13
+  flutter_web_auth_2: ^4.0.0
+
+  # Device Info
+  device_info_plus: ^10.1.0
+  package_info_plus: ^8.0.2
+  connectivity_plus: ^6.0.5
+
+  # Google Sign In (Native)
+  google_sign_in: ^6.1.6
+
+  # Utilities
+  intl: ^0.20.2
+  video_player: 2.8.2
+  flutter_redux: ^0.10.0
+  redux: ^5.0.0
+  firebase_core: ^3.13.1
+  firebase_messaging: ^15.2.5
+  flutter_local_notifications: ^18.0.1
+  easy_localization: ^3.0.7
+  image_picker: ^1.1.2
+  flutter_chat_ui: ^1.6.15
+  flutter_chat_types: ^3.6.2
+  image_cropper: ^11.0.0
+  image: ^4.1.7
+  meta: ^1.11.0
+  path: ^1.9.0
+  path_provider: ^2.1.5
+  shared_preferences: ^2.2.3
+  cached_network_image: ^3.3.1
+  flutter_cache_manager: ^3.3.1
+  preload_page_view: ^0.2.0
+  flutter_svg: ^2.0.10
+  showcaseview: ^5.1.0
+  camera: ^0.10.5+5
+  permission_handler: ^11.3.1
+  flutter_image_compress: ^2.2.0
+  photo_manager: ^3.0.0
+  geolocator: ^10.1.0
+  geocoding: ^2.2.0
+  video_thumbnail: ^0.5.3
+  visibility_detector: ^0.4.0+2
+  extended_image: ^8.2.1
+  share_plus: ^10.0.2
+  url_launcher: ^6.3.0
+  font_awesome_flutter: ^10.7.0
+
+  # Stable compatible versions
+  insta_assets_picker: ^3.4.0
+  wechat_assets_picker: ^9.8.0
+  pro_image_editor: ^9.2.0
+
+  flutter_colorpicker: ^1.1.0
+  google_fonts: ^6.1.0
+  vector_math: ^2.1.4
+
+  # ✅ Stable FFmpeg (LAST PUBLIC WORKING VERSION)
+  ffmpeg_kit_flutter_new: ^4.1.0
+
+  record: ^6.2.0        # real microphone recording
+  just_audio: ^0.9.36   # audio preview in picker
+  socket_io_client: ^2.0.3+1
+
+  http_parser: any
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.1
+
+flutter:
+  uses-material-design: true
+
+  fonts:
+    - family: Lucide
+      fonts:
+        - asset: assets/fonts/lucide.ttf
+
+  assets:
+    - assets/images/dashboard_sample.png
+    - assets/images/bsmart_logo.png
+    - assets/images/logo.svg
+    - assets/images/google_logo.svg
+    - assets/bsmart_icons/
+    - assets/giftcards/
+    - assets/banners/
+    - assets/translations/

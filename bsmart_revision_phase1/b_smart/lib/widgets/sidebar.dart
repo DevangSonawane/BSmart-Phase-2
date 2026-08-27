@@ -1,0 +1,582 @@
+import 'package:flutter/material.dart';
+import 'package:easy_localization/easy_localization.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
+import 'package:google_fonts/google_fonts.dart';
+import 'package:showcaseview/showcaseview.dart';
+import '../theme/design_tokens.dart';
+import '../theme/theme_scope.dart';
+import '../services/home_onboarding_service.dart';
+import 'showcase_tooltip_actions.dart';
+
+/// Desktop sidebar matching React: collapsible on hover, nav items, Create dropdown.
+class Sidebar extends StatefulWidget {
+  final int currentIndex;
+  final ValueChanged<int> onNavTap;
+  final bool isVendor;
+  final VoidCallback? onCreatePost;
+  final VoidCallback? onUploadReel;
+  final VoidCallback? onCreateAd;
+  final HomeOnboardingStep? homeStep;
+  final HomeOnboardingStep? adsStep;
+  final HomeOnboardingStep? createStep;
+  final HomeOnboardingStep? rocketStep;
+  final HomeOnboardingStep? reelsStep;
+
+  const Sidebar({
+    super.key,
+    required this.currentIndex,
+    required this.onNavTap,
+    this.isVendor = false,
+    this.onCreatePost,
+    this.onUploadReel,
+    this.onCreateAd,
+    this.homeStep,
+    this.adsStep,
+    this.createStep,
+    this.rocketStep,
+    this.reelsStep,
+  });
+
+  @override
+  State<Sidebar> createState() => _SidebarState();
+}
+
+class _SidebarState extends State<Sidebar> {
+  bool _hovered = false;
+  bool _createDropdownOpen = false;
+
+  static const double _narrowWidth = 80;
+  static const double _wideWidth = 256;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final inactiveColor = isDark ? Colors.grey.shade200 : Colors.grey.shade800;
+    return MouseRegion(
+      onEnter: (_) => setState(() => _hovered = true),
+      onExit: (_) => setState(() {
+        _hovered = false;
+        _createDropdownOpen = false;
+      }),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 300),
+        width: _hovered ? _wideWidth : _narrowWidth,
+        decoration: BoxDecoration(
+          color: theme.scaffoldBackgroundColor,
+          border: Border(
+              right: BorderSide(
+                  color: isDark ? Colors.grey.shade800 : Colors.grey.shade200)),
+        ),
+        child: Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.all(24),
+              child: _hovered
+                  ? Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Container(
+                          width: 32,
+                          height: 32,
+                          decoration: BoxDecoration(
+                            gradient: DesignTokens.instaGradient,
+                            borderRadius: BorderRadius.circular(8),
+                            boxShadow: [
+                              BoxShadow(
+                                  color: Colors.black.withAlpha(40),
+                                  blurRadius: 6,
+                                  offset: const Offset(0, 2)),
+                            ],
+                          ),
+                          child: const Center(
+                              child: Text('b',
+                                  style: TextStyle(
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 18))),
+                        ),
+                        const SizedBox(width: 8),
+                        ShaderMask(
+                          shaderCallback: (bounds) => const LinearGradient(
+                            colors: [
+                              DesignTokens.instaPurple,
+                              DesignTokens.instaPink,
+                              DesignTokens.instaOrange
+                            ],
+                          ).createShader(bounds),
+                          child: const Text('B-Smart',
+                              style: TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 22,
+                                  fontFamily: 'Montserrat')),
+                        ),
+                      ],
+                    )
+                  : Container(
+                      width: 40,
+                      height: 40,
+                      decoration: BoxDecoration(
+                        gradient: DesignTokens.instaGradient,
+                        borderRadius: BorderRadius.circular(8),
+                        boxShadow: [
+                          BoxShadow(
+                              color: Colors.black.withAlpha(40),
+                              blurRadius: 6,
+                              offset: const Offset(0, 2)),
+                        ],
+                      ),
+                      child: const Center(
+                          child: Text('b',
+                              style: TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 20))),
+                    ),
+            ),
+            const SizedBox(height: 8),
+            Expanded(
+              child: ListView(
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                children: [
+                  _buildNavItemWithShowcase(
+                    context,
+                    step: widget.homeStep,
+                    icon: LucideIcons.house,
+                    label: 'nav_home'.tr(),
+                    index: 0,
+                    currentIndex: widget.currentIndex,
+                    hovered: _hovered,
+                    onTap: () => widget.onNavTap(0),
+                    inactiveColor: inactiveColor,
+                  ),
+                  _buildNavItemWithShowcase(
+                    context,
+                    step: widget.adsStep,
+                    icon: LucideIcons.target,
+                    label: 'nav_ads'.tr(),
+                    index: 1,
+                    currentIndex: widget.currentIndex,
+                    hovered: _hovered,
+                    onTap: () => widget.onNavTap(1),
+                    inactiveColor: inactiveColor,
+                  ),
+                  _buildCreateItemWithShowcase(
+                    context,
+                    step: widget.createStep,
+                    currentIndex: widget.currentIndex,
+                    isVendor: widget.isVendor,
+                    hovered: _hovered,
+                    dropdownOpen: _createDropdownOpen,
+                    onTap: () => setState(
+                        () => _createDropdownOpen = !_createDropdownOpen),
+                    onDismiss: () =>
+                        setState(() => _createDropdownOpen = false),
+                    onCreatePost: () {
+                      setState(() => _createDropdownOpen = false);
+                      widget.onCreatePost?.call();
+                    },
+                    onUploadReel: () {
+                      setState(() => _createDropdownOpen = false);
+                      widget.onUploadReel?.call();
+                    },
+                    onCreateAd: () {
+                      setState(() => _createDropdownOpen = false);
+                      widget.onCreateAd?.call();
+                    },
+                  ),
+                  _buildNavItemWithShowcase(
+                    context,
+                    step: widget.rocketStep,
+                    icon: LucideIcons.rocket,
+                    label: 'nav_promote'.tr(),
+                    index: 3,
+                    currentIndex: widget.currentIndex,
+                    hovered: _hovered,
+                    onTap: () => widget.onNavTap(3),
+                    inactiveColor: inactiveColor,
+                  ),
+                  _buildNavItemWithShowcase(
+                    context,
+                    step: widget.reelsStep,
+                    icon: LucideIcons.clapperboard,
+                    label: 'nav_reels'.tr(),
+                    index: 4,
+                    currentIndex: widget.currentIndex,
+                    hovered: _hovered,
+                    onTap: () => widget.onNavTap(4),
+                    inactiveColor: inactiveColor,
+                  ),
+                  _NavItem(
+                      icon: LucideIcons.user,
+                      label: 'nav_profile'.tr(),
+                      index: 5,
+                      currentIndex: widget.currentIndex,
+                      hovered: _hovered,
+                      onTap: () => widget.onNavTap(5),
+                      inactiveColor: inactiveColor),
+                  const SizedBox(height: 16),
+                  _NavItem(
+                      icon: LucideIcons.menu,
+                      label: 'nav_more'.tr(),
+                      index: -1,
+                      currentIndex: -2,
+                      hovered: _hovered,
+                      onTap: () {},
+                      inactiveColor: inactiveColor),
+                ],
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.all(12),
+              child: Material(
+                color: Colors.transparent,
+                child: InkWell(
+                  onTap: () => ThemeScope.of(context).toggle(),
+                  borderRadius: BorderRadius.circular(12),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 12, vertical: 10),
+                    child: Row(
+                      mainAxisAlignment: _hovered
+                          ? MainAxisAlignment.start
+                          : MainAxisAlignment.center,
+                      children: [
+                        Icon(isDark ? LucideIcons.moon : LucideIcons.sun,
+                            size: 22, color: inactiveColor),
+                        if (_hovered) ...[
+                          const SizedBox(width: 12),
+                          Text('nav_appearance'.tr(),
+                              style: TextStyle(
+                                  color: inactiveColor,
+                                  fontWeight: FontWeight.w500)),
+                          const Spacer(),
+                          Switch(
+                            value: isDark,
+                            onChanged: (_) => ThemeScope.of(context).toggle(),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+extension _SidebarShowcase on _SidebarState {
+  Widget _buildNavItemWithShowcase(
+    BuildContext context, {
+    required HomeOnboardingStep? step,
+    required IconData icon,
+    required String label,
+    required int index,
+    required int currentIndex,
+    required bool hovered,
+    required VoidCallback onTap,
+    required Color inactiveColor,
+  }) {
+    final child = _NavItem(
+      icon: icon,
+      label: label,
+      index: index,
+      currentIndex: currentIndex,
+      hovered: hovered,
+      onTap: onTap,
+      inactiveColor: inactiveColor,
+    );
+
+    return _wrapShowcase(
+      context,
+      step: step,
+      isPrimary: false,
+      targetShapeBorder: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+      ),
+      targetPadding: const EdgeInsets.all(4),
+      child: child,
+    );
+  }
+
+  Widget _buildCreateItemWithShowcase(
+    BuildContext context, {
+    required HomeOnboardingStep? step,
+    required int currentIndex,
+    required bool isVendor,
+    required bool hovered,
+    required bool dropdownOpen,
+    required VoidCallback onTap,
+    required VoidCallback onDismiss,
+    VoidCallback? onCreatePost,
+    VoidCallback? onUploadReel,
+    VoidCallback? onCreateAd,
+  }) {
+    final child = _CreateItem(
+      currentIndex: currentIndex,
+      isVendor: isVendor,
+      hovered: hovered,
+      dropdownOpen: dropdownOpen,
+      onTap: onTap,
+      onDismiss: onDismiss,
+      onCreatePost: onCreatePost,
+      onUploadReel: onUploadReel,
+      onCreateAd: onCreateAd,
+    );
+
+    return _wrapShowcase(
+      context,
+      step: step,
+      isPrimary: true,
+      targetShapeBorder: const CircleBorder(),
+      targetPadding: const EdgeInsets.all(8),
+      child: child,
+    );
+  }
+
+  Widget _wrapShowcase(
+    BuildContext context, {
+    required HomeOnboardingStep? step,
+    required bool isPrimary,
+    required ShapeBorder targetShapeBorder,
+    required EdgeInsets targetPadding,
+    required Widget child,
+  }) {
+    if (step == null) return child;
+
+    final theme = Theme.of(context);
+    const overlayColor = Colors.black;
+    final tooltipBg = theme.colorScheme.surface;
+    final titleStyle = GoogleFonts.montserrat(
+      fontSize: isPrimary ? 18 : 16,
+      fontWeight: FontWeight.w800,
+      color: theme.colorScheme.onSurface,
+      height: 1.2,
+    );
+    final descStyle = GoogleFonts.montserrat(
+      fontSize: 13,
+      fontWeight: FontWeight.w500,
+      height: 1.4,
+      color: theme.colorScheme.onSurfaceVariant,
+    );
+
+    return Showcase(
+      key: step.key,
+      title: step.title,
+      description: step.description,
+      tooltipActions: buildOnboardingTooltipActions(),
+      showArrow: false,
+      tooltipPosition: step.tooltipPosition,
+      tooltipBackgroundColor: tooltipBg,
+      titleTextStyle: titleStyle,
+      descTextStyle: descStyle,
+      tooltipBorderRadius: BorderRadius.circular(isPrimary ? 28 : 24),
+      overlayColor: overlayColor,
+      overlayOpacity: isPrimary ? 0.72 : 0.72,
+      blurValue: isPrimary ? 1.8 : 1.6,
+      targetShapeBorder: targetShapeBorder,
+      targetPadding: targetPadding,
+      targetTooltipGap: isPrimary ? 18 : 12,
+      toolTipMargin: isPrimary ? 20 : 14,
+      disableBarrierInteraction: true,
+      enableAutoScroll: false,
+      scrollAlignment: 0.45,
+      child: child,
+    );
+  }
+}
+
+class _NavItem extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final int index;
+  final int currentIndex;
+  final bool hovered;
+  final VoidCallback onTap;
+  final Color inactiveColor;
+
+  const _NavItem({
+    required this.icon,
+    required this.label,
+    required this.index,
+    required this.currentIndex,
+    required this.hovered,
+    required this.onTap,
+    required this.inactiveColor,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final active = currentIndex == index;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 4),
+      child: Material(
+        color:
+            active ? DesignTokens.instaPink.withAlpha(25) : Colors.transparent,
+        borderRadius: BorderRadius.circular(12),
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(12),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+            child: Row(
+              children: [
+                Icon(icon,
+                    size: 24,
+                    color: active ? DesignTokens.instaPink : inactiveColor),
+                if (hovered) ...[
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: Text(
+                      label,
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: active ? FontWeight.bold : FontWeight.w500,
+                        color: active ? DesignTokens.instaPink : inactiveColor,
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _CreateItem extends StatelessWidget {
+  final int currentIndex;
+  final bool isVendor;
+  final bool hovered;
+  final bool dropdownOpen;
+  final VoidCallback onTap;
+  final VoidCallback onDismiss;
+  final VoidCallback? onCreatePost;
+  final VoidCallback? onUploadReel;
+  final VoidCallback? onCreateAd;
+
+  const _CreateItem({
+    required this.currentIndex,
+    required this.isVendor,
+    required this.hovered,
+    required this.dropdownOpen,
+    required this.onTap,
+    required this.onDismiss,
+    this.onCreatePost,
+    this.onUploadReel,
+    this.onCreateAd,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final active = dropdownOpen;
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 4),
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          Material(
+            color: active
+                ? DesignTokens.instaPink.withAlpha(25)
+                : Colors.transparent,
+            borderRadius: BorderRadius.circular(12),
+            child: InkWell(
+              onTap: onTap,
+              borderRadius: BorderRadius.circular(12),
+              child: Padding(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                child: Row(
+                  children: [
+                    Icon(LucideIcons.squarePlus,
+                        size: 24,
+                        color: active
+                            ? DesignTokens.instaPink
+                            : Colors.grey.shade800),
+                    if (hovered) ...[
+                      const SizedBox(width: 16),
+                      Expanded(
+                        child: Text(
+                          'nav_create'.tr(),
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight:
+                                active ? FontWeight.bold : FontWeight.w500,
+                            color: active
+                                ? DesignTokens.instaPink
+                                : Colors.grey.shade800,
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ),
+          ),
+          if (dropdownOpen)
+            Positioned(
+              left: hovered ? 0 : 56,
+              top: 48,
+              child: Material(
+                elevation: 8,
+                borderRadius: BorderRadius.circular(12),
+                child: Container(
+                  width: 192,
+                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  decoration: BoxDecoration(
+                    color: theme.cardColor,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                        color: isDark
+                            ? Colors.grey.shade800
+                            : Colors.grey.shade100),
+                  ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (isVendor)
+                        ListTile(
+                          leading: const Icon(LucideIcons.megaphone, size: 20),
+                          title: Text('nav_create_ads'.tr(),
+                              style: const TextStyle(
+                                  fontSize: 14, fontWeight: FontWeight.w500)),
+                          onTap: onCreateAd,
+                        )
+                      else ...[
+                        ListTile(
+                          leading: const Icon(LucideIcons.image, size: 20),
+                          title: Text('nav_create_post'.tr(),
+                              style: const TextStyle(
+                                  fontSize: 14, fontWeight: FontWeight.w500)),
+                          onTap: onCreatePost,
+                        ),
+                        ListTile(
+                          leading: const Icon(LucideIcons.video, size: 20),
+                          title: Text('nav_upload_reel'.tr(),
+                              style: const TextStyle(
+                                  fontSize: 14, fontWeight: FontWeight.w500)),
+                          onTap: onUploadReel,
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}

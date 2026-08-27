@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "492094390523",
+    "project_id": "bsmart-5116a",
+    "storage_bucket": "bsmart-5116a.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:492094390523:android:1d310373ae69b437fcb05e",
+        "android_client_info": {
+          "package_name": "com.ruvees.bsmart"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyADxbsYwEiagCqMaLYTtc-z3MGZqSC0w3w"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

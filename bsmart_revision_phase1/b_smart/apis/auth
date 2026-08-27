@@ -1,0 +1,66 @@
+POST
+/api/auth/login
+Login user
+
+
+Parameters
+Try it out
+No parameters
+
+Request body
+
+application/json
+Example Value
+Schema
+{
+  "email": "user@example.com",
+  "password": "string",
+  "otp": "string"
+}
+Responses
+Code	Description	Links
+200	
+Login successful or 2FA verification required
+
+Media type
+
+application/json
+Controls Accept header.
+Examples
+
+login_success
+Example Value
+Schema
+{
+  "token": "jwt_token_here",
+  "user": {
+    "id": "60f1b2c3d4e5f67890123456",
+    "email": "member@example.com",
+    "username": "member123",
+    "full_name": "Member Name",
+    "avatar_url": "",
+    "phone": "+911234567890",
+    "age": 25,
+    "gender": "male",
+    "location": "Mumbai, India",
+    "role": "member",
+    "twoFA": {
+      "enabled": false
+    },
+    "followers_count": 0,
+    "following_count": 0,
+    "wallet": {
+      "balance": 0,
+      "currency": "Coins"
+    }
+  }
+}
+No links
+400	
+Invalid credentials
+
+No links
+500	
+Server error
+
+No links
