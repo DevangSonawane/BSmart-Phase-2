@@ -237,11 +237,11 @@ class _FeedRenderRow {
     );
   }
 
-  factory _FeedRenderRow.nativeAd() {
-    return const _FeedRenderRow._(
+  factory _FeedRenderRow.nativeAd(int adIndex) {
+    return _FeedRenderRow._(
       type: _FeedRenderRowType.nativeAd,
       post: null,
-      suggestionBlockIndex: -1,
+      suggestionBlockIndex: adIndex,
     );
   }
 
@@ -1558,7 +1558,6 @@ class _HomeDashboardState extends State<HomeDashboard>
     var peopleBlockIndex = 0;
     var vendorBlockIndex = 0;
     var insertCycleIndex = 0;
-    var nativeAdInserted = false;
 
     FeedPost? nextAdForBlock(int idx) {
       final list = _adSuggestions;
@@ -1569,9 +1568,8 @@ class _HomeDashboardState extends State<HomeDashboard>
     for (final p in posts) {
       rows.add(_FeedRenderRow.post(p));
       postCount++;
-      if (!nativeAdInserted && postCount >= 8) {
-        rows.add(_FeedRenderRow.nativeAd());
-        nativeAdInserted = true;
+      if (postCount % 5 == 0) {
+        rows.add(_FeedRenderRow.nativeAd(postCount ~/ 5));
       }
       if (postCount % 5 != 0) continue;
 
@@ -3784,8 +3782,10 @@ class _HomeDashboardState extends State<HomeDashboard>
                                   );
                                 }
                                 if (row.type == _FeedRenderRowType.nativeAd) {
-                                  return const AdMobNativeAd(
-                                    key: ValueKey('feed-native-ad'),
+                                  return AdMobNativeAd(
+                                    key: ValueKey(
+                                      'feed-native-ad-${row.suggestionBlockIndex}',
+                                    ),
                                   );
                                 }
 
@@ -3896,10 +3896,11 @@ class _HomeDashboardState extends State<HomeDashboard>
 
     Widget buildTabScaffold(int idx) {
       final isFullScreen = idx == 1 || idx == 3 || idx == 4;
+      final bottomBannerOffset = MediaQuery.of(context).padding.bottom + 60.0;
       final body = idx == 0
-          ? Column(
+          ? Stack(
               children: [
-                Expanded(
+                Positioned.fill(
                   child: ColoredBox(
                     color: isFullScreen
                         ? (isDark ? const Color(0xFF121212) : Colors.black)
@@ -3907,9 +3908,11 @@ class _HomeDashboardState extends State<HomeDashboard>
                     child: buildTabBody(idx),
                   ),
                 ),
-                const SafeArea(
-                  top: false,
-                  child: AdMobBanner(),
+                Positioned(
+                  left: 0,
+                  right: 0,
+                  bottom: bottomBannerOffset,
+                  child: const AdMobBanner(),
                 ),
               ],
             )

@@ -128,7 +128,7 @@ class _AdMobNativeAdState extends State<AdMobNativeAd> {
             ),
             if (ad != null)
               SizedBox(
-                height: 320,
+                height: 400,
                 child: ClipRRect(
                   borderRadius: const BorderRadius.vertical(
                     bottom: Radius.circular(18),

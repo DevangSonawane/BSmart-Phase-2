@@ -2,7 +2,6 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 import '../config/ad_config.dart';
 
@@ -10,13 +9,10 @@ class AdMobService {
   AdMobService._();
 
   static final AdMobService instance = AdMobService._();
-  static const String _successfulPostCountKeyPrefix =
-      'admob_successful_post_count_v1';
 
   bool _initialized = false;
   bool _loadingInterstitial = false;
   InterstitialAd? _interstitialAd;
-  final Map<String, int> _successfulPostCountCache = <String, int>{};
 
   bool get _isMobileSupported {
     switch (defaultTargetPlatform) {
@@ -29,42 +25,6 @@ class AdMobService {
       case TargetPlatform.windows:
         return false;
     }
-  }
-
-  String _successfulPostCountKey(String userId) =>
-      '$_successfulPostCountKeyPrefix:${userId.trim()}';
-
-  Future<int> _readSuccessfulPostCount(String userId) async {
-    final normalizedUserId = userId.trim();
-    if (normalizedUserId.isEmpty) return 0;
-    final cached = _successfulPostCountCache[normalizedUserId];
-    if (cached != null) return cached;
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final count =
-          prefs.getInt(_successfulPostCountKey(normalizedUserId)) ?? 0;
-      _successfulPostCountCache[normalizedUserId] = count;
-      return count;
-    } catch (e, st) {
-      debugPrint('Failed to read ad counter: $e');
-      debugPrint(st.toString());
-      return 0;
-    }
-  }
-
-  Future<int> _incrementSuccessfulPostCount(String userId) async {
-    final normalizedUserId = userId.trim();
-    if (normalizedUserId.isEmpty) return 0;
-    final next = (await _readSuccessfulPostCount(normalizedUserId)) + 1;
-    _successfulPostCountCache[normalizedUserId] = next;
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setInt(_successfulPostCountKey(normalizedUserId), next);
-    } catch (e, st) {
-      debugPrint('Failed to persist ad counter: $e');
-      debugPrint(st.toString());
-    }
-    return next;
   }
 
   Future<void> initialize() async {
@@ -124,7 +84,7 @@ class AdMobService {
     );
   }
 
-  Future<void> showInterstitialAfterPostPublish() async {
+  Future<void> showInterstitialAfterSuccessfulPublish() async {
     if (!_isMobileSupported) return;
     final ad = _interstitialAd;
     if (ad == null) {
@@ -142,13 +102,14 @@ class AdMobService {
     }
   }
 
-  Future<bool> recordSuccessfulPostAndMaybeShowInterstitial({
+  Future<void> showInterstitialAfterPostPublish() async {
+    await showInterstitialAfterSuccessfulPublish();
+  }
+
+  @Deprecated('Use showInterstitialAfterSuccessfulPublish')
+  Future<void> recordSuccessfulPostAndMaybeShowInterstitial({
     required String userId,
   }) async {
-    if (!_isMobileSupported) return false;
-    final count = await _incrementSuccessfulPostCount(userId);
-    if (count <= 0 || count % 5 != 0) return false;
-    await showInterstitialAfterPostPublish();
-    return true;
+    await showInterstitialAfterSuccessfulPublish();
   }
 }

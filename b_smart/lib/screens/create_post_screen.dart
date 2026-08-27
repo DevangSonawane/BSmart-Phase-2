@@ -1154,9 +1154,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
           await Future.delayed(const Duration(milliseconds: 900));
           await UploadProgressOverlay.hide();
           unawaited(
-            AdMobService.instance.recordSuccessfulPostAndMaybeShowInterstitial(
-              userId: userId,
-            ),
+            AdMobService.instance.showInterstitialAfterSuccessfulPublish(),
           );
         } else {
           UploadProgressOverlay.update(
