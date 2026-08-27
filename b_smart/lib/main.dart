@@ -23,6 +23,7 @@ import 'state/store.dart';
 import 'state/app_state.dart';
 import 'state/auth_actions.dart';
 import 'config/api_config.dart';
+import 'services/admob_service.dart';
 import 'api/api.dart';
 import 'package:flutter_redux/flutter_redux.dart';
 import 'theme/design_tokens.dart';
@@ -215,6 +216,7 @@ void main() async {
     }
     await NetworkStatusNotifier.instance.initialize();
     await PushService().initialize(firebaseAvailable: firebaseReady);
+    unawaited(AdMobService.instance.initialize());
 
     runApp(StoreProvider<AppState>(
       store: store,

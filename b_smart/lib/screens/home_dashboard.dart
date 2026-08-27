@@ -26,6 +26,8 @@ import '../state/app_state.dart';
 import '../state/profile_actions.dart';
 import '../state/feed_actions.dart';
 import '../widgets/post_card.dart';
+import '../widgets/admob_banner.dart';
+import '../widgets/admob_native_ad.dart';
 import '../widgets/stories_row.dart';
 import '../widgets/bottom_nav.dart';
 import '../widgets/sidebar.dart';
@@ -185,6 +187,7 @@ class _FeedHeader extends StatelessWidget {
 
 enum _FeedRenderRowType {
   post,
+  nativeAd,
   suggestedReels,
   suggestedAds,
   suggestedPeople,
@@ -229,6 +232,14 @@ class _FeedRenderRow {
   factory _FeedRenderRow.reelsSuggestions() {
     return const _FeedRenderRow._(
       type: _FeedRenderRowType.suggestedReels,
+      post: null,
+      suggestionBlockIndex: -1,
+    );
+  }
+
+  factory _FeedRenderRow.nativeAd() {
+    return const _FeedRenderRow._(
+      type: _FeedRenderRowType.nativeAd,
       post: null,
       suggestionBlockIndex: -1,
     );
@@ -1547,6 +1558,7 @@ class _HomeDashboardState extends State<HomeDashboard>
     var peopleBlockIndex = 0;
     var vendorBlockIndex = 0;
     var insertCycleIndex = 0;
+    var nativeAdInserted = false;
 
     FeedPost? nextAdForBlock(int idx) {
       final list = _adSuggestions;
@@ -1557,6 +1569,10 @@ class _HomeDashboardState extends State<HomeDashboard>
     for (final p in posts) {
       rows.add(_FeedRenderRow.post(p));
       postCount++;
+      if (!nativeAdInserted && postCount >= 8) {
+        rows.add(_FeedRenderRow.nativeAd());
+        nativeAdInserted = true;
+      }
       if (postCount % 5 != 0) continue;
 
       // After every 5 posts, insert ONE block in a repeating cycle:
@@ -3767,6 +3783,11 @@ class _HomeDashboardState extends State<HomeDashboard>
                                     ],
                                   );
                                 }
+                                if (row.type == _FeedRenderRowType.nativeAd) {
+                                  return const AdMobNativeAd(
+                                    key: ValueKey('feed-native-ad'),
+                                  );
+                                }
 
                                 final p = row.post!;
                                 final isOwnPost = _currentUserId != null &&
@@ -3875,18 +3896,37 @@ class _HomeDashboardState extends State<HomeDashboard>
 
     Widget buildTabScaffold(int idx) {
       final isFullScreen = idx == 1 || idx == 3 || idx == 4;
+      final body = idx == 0
+          ? Column(
+              children: [
+                Expanded(
+                  child: ColoredBox(
+                    color: isFullScreen
+                        ? (isDark ? const Color(0xFF121212) : Colors.black)
+                        : theme.scaffoldBackgroundColor,
+                    child: buildTabBody(idx),
+                  ),
+                ),
+                const SafeArea(
+                  top: false,
+                  child: AdMobBanner(),
+                ),
+              ],
+            )
+          : ColoredBox(
+              color: isFullScreen
+                  ? (isDark ? const Color(0xFF121212) : Colors.black)
+                  : theme.scaffoldBackgroundColor,
+              child: buildTabBody(idx),
+            );
+
       return Scaffold(
         extendBody: idx != 4,
         backgroundColor: isFullScreen
             ? (isDark ? const Color(0xFF121212) : Colors.black)
             : theme.scaffoldBackgroundColor,
         appBar: buildAppBar(idx),
-        body: ColoredBox(
-          color: isFullScreen
-              ? (isDark ? const Color(0xFF121212) : Colors.black)
-              : theme.scaffoldBackgroundColor,
-          child: buildTabBody(idx),
-        ),
+        body: body,
         bottomNavigationBar: isDesktop || idx == 4
             ? null
             : (idx == 0
