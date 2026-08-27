@@ -50,8 +50,7 @@ class AuthService {
   final ApiClient _apiClient = ApiClient();
   final GoogleSignIn _googleSignIn = GoogleSignIn(
     scopes: ['email', 'https://www.googleapis.com/auth/userinfo.profile'],
-    serverClientId:
-        '832065490130-97j2a560l5e30p3tu90j9miqfdkdctlv.apps.googleusercontent.com',
+    serverClientId: AuthConstants.googleWebClientId,
   );
 
   // In-memory storage for signup sessions during the flow
@@ -165,6 +164,19 @@ class AuthService {
         'Google login failed at backend exchange (HTTP ${e.statusCode}): ${e.message}',
       );
     } on PlatformException catch (e) {
+      final platformMessage =
+          '${e.code} ${e.message ?? ''} ${e.details ?? ''}'.toLowerCase();
+
+      if (platformMessage.contains('apiexception: 10') ||
+          platformMessage.contains('sign_in_failed')) {
+        throw Exception(
+          'Google sign-in is not registered for this Android build. '
+          'Add the release SHA-1 fingerprint to the Android OAuth client in '
+          'Google Cloud/Firebase, then download the updated google-services.json '
+          'and rebuild.',
+        );
+      }
+
       if (e.code == 'channel-error') {
         throw Exception(
           'Google login native channel is not connected (${e.code}). Rebuild the app fully (flutter clean + flutter pub get + reinstall app) and verify native Google config for this app id.',
