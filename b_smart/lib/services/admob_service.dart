@@ -18,8 +18,18 @@ class AdMobService {
   InterstitialAd? _interstitialAd;
   final Map<String, int> _successfulPostCountCache = <String, int>{};
 
-  bool get isAndroidSupported =>
-      defaultTargetPlatform == TargetPlatform.android;
+  bool get _isMobileSupported {
+    switch (defaultTargetPlatform) {
+      case TargetPlatform.android:
+      case TargetPlatform.iOS:
+        return true;
+      case TargetPlatform.fuchsia:
+      case TargetPlatform.linux:
+      case TargetPlatform.macOS:
+      case TargetPlatform.windows:
+        return false;
+    }
+  }
 
   String _successfulPostCountKey(String userId) =>
       '$_successfulPostCountKeyPrefix:${userId.trim()}';
@@ -58,7 +68,7 @@ class AdMobService {
   }
 
   Future<void> initialize() async {
-    if (!isAndroidSupported || _initialized) return;
+    if (!_isMobileSupported || _initialized) return;
     _initialized = true;
     try {
       await MobileAds.instance.initialize();
@@ -71,7 +81,7 @@ class AdMobService {
   }
 
   void preloadInterstitial() {
-    if (!isAndroidSupported ||
+    if (!_isMobileSupported ||
         _loadingInterstitial ||
         _interstitialAd != null) {
       return;
@@ -115,7 +125,7 @@ class AdMobService {
   }
 
   Future<void> showInterstitialAfterPostPublish() async {
-    if (!isAndroidSupported) return;
+    if (!_isMobileSupported) return;
     final ad = _interstitialAd;
     if (ad == null) {
       preloadInterstitial();
@@ -135,7 +145,7 @@ class AdMobService {
   Future<bool> recordSuccessfulPostAndMaybeShowInterstitial({
     required String userId,
   }) async {
-    if (!isAndroidSupported) return false;
+    if (!_isMobileSupported) return false;
     final count = await _incrementSuccessfulPostCount(userId);
     if (count <= 0 || count % 5 != 0) return false;
     await showInterstitialAfterPostPublish();

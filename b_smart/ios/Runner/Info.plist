@@ -65,6 +65,8 @@
 	<true/>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
+	<key>GADApplicationIdentifier</key>
+	<string>ca-app-pub-6848080783292385~9100696019</string>
 	<key>GIDClientID</key>
 	<string>832065490130-kvnh008mgsptm8fl0iciv0hga0ucrnkn.apps.googleusercontent.com</string>
 	<key>NSPhotoLibraryUsageDescription</key>

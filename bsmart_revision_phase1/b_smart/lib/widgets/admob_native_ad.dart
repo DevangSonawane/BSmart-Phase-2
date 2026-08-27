@@ -21,7 +21,18 @@ class _AdMobNativeAdState extends State<AdMobNativeAd> {
   bool _isLoaded = false;
   bool _hasError = false;
 
-  bool get _supportsAds => defaultTargetPlatform == TargetPlatform.android;
+  bool get _supportsAds {
+    switch (defaultTargetPlatform) {
+      case TargetPlatform.android:
+      case TargetPlatform.iOS:
+        return true;
+      case TargetPlatform.fuchsia:
+      case TargetPlatform.linux:
+      case TargetPlatform.macOS:
+      case TargetPlatform.windows:
+        return false;
+    }
+  }
 
   @override
   void initState() {
