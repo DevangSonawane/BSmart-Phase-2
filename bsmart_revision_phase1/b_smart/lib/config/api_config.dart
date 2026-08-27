@@ -5,7 +5,7 @@
 /// e.g. `https://api.bebsmart.in/api`.
 class ApiConfig {
   // Use HTTPS to avoid 301 redirects from the server.
-  static String _baseUrl = 'https://api.bebsmart.in/api';
+  static String _baseUrl = 'https://api.bebsmart.online/api';
   static Duration _timeout = const Duration(seconds: 30);
 
   /// Initialize runtime values (call after loading dotenv in `main()`).
