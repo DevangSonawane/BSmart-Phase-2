@@ -5,6 +5,7 @@ import 'package:google_fonts/google_fonts.dart';
 
 import '../api/api_client.dart';
 import '../api/follows_api.dart';
+import '../api/users_api.dart';
 import '../api/suggestions_api.dart';
 import '../utils/current_user.dart';
 import '../utils/url_helper.dart';
@@ -21,12 +22,14 @@ class SuggestedUserDetailsPage extends StatefulWidget {
 class _SuggestedUserDetailsPageState extends State<SuggestedUserDetailsPage> {
   final SuggestionsApi _suggestionsApi = SuggestionsApi();
   final FollowsApi _followsApi = FollowsApi();
+  final UsersApi _usersApi = UsersApi();
 
   bool _loading = true;
   String? _error;
   String? _currentUserId;
   Map<String, String>? _imageHeaders;
   List<_SuggestedUserEntry> _people = const [];
+  _SuggestedUserEntry? _heroPerson;
 
   @override
   void initState() {
@@ -34,8 +37,9 @@ class _SuggestedUserDetailsPageState extends State<SuggestedUserDetailsPage> {
     unawaited(_load());
   }
 
-  Future<void> _load() async {
+  Future<void> _load({bool rotateHero = false}) async {
     if (!mounted) return;
+    final previousHeroId = _heroPerson?.id.trim() ?? '';
     setState(() {
       _loading = true;
       _error = null;
@@ -98,9 +102,35 @@ class _SuggestedUserDetailsPageState extends State<SuggestedUserDetailsPage> {
         }
       }
 
+      _SuggestedUserEntry? heroPerson;
+      if (normalized.isNotEmpty) {
+        heroPerson = _pickHeroPerson(
+          normalized,
+          avoidId: rotateHero ? previousHeroId : '',
+        );
+        try {
+          final profileResult = await Future.wait([
+            _usersApi.getUserProfile(heroPerson.id),
+            _usersApi.getUserProfileContent(heroPerson.id),
+          ]);
+          final profile = profileResult[0];
+          final content = profileResult[1];
+          final mergedProfile = _mergeProfilePayloads(profile, content);
+          if (mergedProfile.isNotEmpty) {
+            final merged = _heroEntryFromProfile(mergedProfile);
+            if (merged != null) {
+              heroPerson = merged;
+            }
+          }
+        } catch (_) {
+          // Keep the suggestion fallback if the profile fetch fails.
+        }
+      }
+
       if (!mounted) return;
       setState(() {
         _people = normalized;
+        _heroPerson = heroPerson;
         _loading = false;
       });
     } catch (e) {
@@ -137,9 +167,12 @@ class _SuggestedUserDetailsPageState extends State<SuggestedUserDetailsPage> {
   @override
   Widget build(BuildContext context) {
     final people = _people;
-    final hero = people.isNotEmpty ? people.first : null;
-    final cards =
-        people.length > 1 ? people.sublist(1) : const <_SuggestedUserEntry>[];
+    final hero = _heroPerson ?? (people.isNotEmpty ? people.first : null);
+    final cards = hero == null
+        ? people
+        : people
+            .where((person) => person.id != hero.id)
+            .toList(growable: false);
 
     return Scaffold(
       backgroundColor: const Color(0xFFF4F2ED),
@@ -147,7 +180,7 @@ class _SuggestedUserDetailsPageState extends State<SuggestedUserDetailsPage> {
         left: false,
         right: false,
         child: RefreshIndicator(
-          onRefresh: _load,
+          onRefresh: () => _load(rotateHero: true),
           color: const Color(0xFF111318),
           child: ListView(
             physics: const AlwaysScrollableScrollPhysics(
@@ -288,6 +321,30 @@ class _SuggestedUserDetailsPageState extends State<SuggestedUserDetailsPage> {
       ),
     );
   }
+}
+
+_SuggestedUserEntry _pickHeroPerson(
+  List<_SuggestedUserEntry> people, {
+  String avoidId = '',
+}) {
+  final trimmedAvoidId = avoidId.trim();
+  if (trimmedAvoidId.isEmpty) {
+    return people.first;
+  }
+
+  final avoidIndex =
+      people.indexWhere((person) => person.id.trim() == trimmedAvoidId);
+  if (avoidIndex == -1) return people.first;
+  if (people.length == 1) return people.first;
+
+  final nextIndex = (avoidIndex + 1) % people.length;
+  if (people[nextIndex].id.trim() == trimmedAvoidId) {
+    return people.firstWhere(
+      (person) => person.id.trim() != trimmedAvoidId,
+      orElse: () => people.first,
+    );
+  }
+  return people[nextIndex];
 }
 
 class _Header extends StatelessWidget {
@@ -505,17 +562,18 @@ class _HeroSuggestionCard extends StatelessWidget {
                           ),
                         ),
                       if (person.verified) const SizedBox(height: 10),
-                      Text(
-                        person.description,
-                        maxLines: 4,
-                        overflow: TextOverflow.ellipsis,
-                        style: GoogleFonts.montserrat(
-                          color: Colors.white.withValues(alpha: 0.78),
-                          fontSize: 13,
-                          height: 1.36,
-                          fontWeight: FontWeight.w500,
+                      if (person.description.isNotEmpty)
+                        Text(
+                          person.description,
+                          maxLines: 4,
+                          overflow: TextOverflow.ellipsis,
+                          style: GoogleFonts.montserrat(
+                            color: Colors.white.withValues(alpha: 0.78),
+                            fontSize: 13,
+                            height: 1.36,
+                            fontWeight: FontWeight.w500,
+                          ),
                         ),
-                      ),
                     ],
                   ),
                 ),
@@ -852,14 +910,6 @@ class _SuggestedUserEntry {
       'name',
       'displayName',
       'display_name',
-      'username',
-      'userName',
-      'handle',
-    ]);
-    final username = _pickString(u, const [
-      'username',
-      'userName',
-      'handle',
     ]);
     final role = _pickString(u, const [
       'role',
@@ -896,10 +946,6 @@ class _SuggestedUserEntry {
       'tagline',
       'subtitle',
     ]);
-    final reason = _pickString(u, const [
-      'reason',
-      'message',
-    ]);
     final mutuals = _mutualsLabelOf(u);
     final avatar = _pickString(u, const [
       'avatarUrl',
@@ -929,8 +975,8 @@ class _SuggestedUserEntry {
       'isFollowingMe',
     ]);
 
-    final title = displayName.isNotEmpty ? displayName : username;
-    final tagline = bio.isNotEmpty ? bio : reason;
+    final title = displayName;
+    final tagline = bio;
 
     final pieces = <String>[];
     if (location.isNotEmpty) pieces.add(location);
@@ -939,7 +985,7 @@ class _SuggestedUserEntry {
 
     return _SuggestedUserEntry(
       id: id,
-      displayName: title.isNotEmpty ? title : 'Suggested user',
+      displayName: title,
       roleLabel: role,
       tagline: tagline,
       location: location,
@@ -962,6 +1008,172 @@ class _SuggestedUserEntry {
     }
     return raw;
   }
+}
+
+_SuggestedUserEntry? _heroEntryFromProfile(Map<String, dynamic> profile) {
+  final candidates = <Map<String, dynamic>>[
+    profile,
+    if (profile['user'] is Map)
+      Map<String, dynamic>.from(profile['user'] as Map),
+    if (profile['profile'] is Map)
+      Map<String, dynamic>.from(profile['profile'] as Map),
+    if (profile['data'] is Map)
+      Map<String, dynamic>.from(profile['data'] as Map),
+  ];
+
+  String firstString(List<String> keys) {
+    for (final candidate in candidates) {
+      final value = _pickString(candidate, keys);
+      if (value.isNotEmpty) return value;
+    }
+    return '';
+  }
+
+  bool firstBool(List<String> keys) {
+    for (final candidate in candidates) {
+      if (_boolOf(candidate, keys)) return true;
+    }
+    return false;
+  }
+
+  final id = firstString(const [
+    'id',
+    '_id',
+    'userId',
+    'user_id',
+    'profileId',
+    'profile_id',
+  ]);
+  if (id.isEmpty) return null;
+
+  final displayName = firstString(const [
+    'username',
+    'userName',
+    'handle',
+    'full_name',
+    'fullName',
+    'display_name',
+    'displayName',
+    'name',
+  ]);
+  final role = firstString(const [
+    'role',
+    'user_role',
+    'userRole',
+    'type',
+    'account_type',
+    'accountType',
+  ]);
+  final bio = firstString(const [
+    'bio',
+    'about',
+    'summary',
+    'headline',
+    'tagline',
+    'subtitle',
+  ]);
+  final avatar = firstString(const [
+    'avatarUrl',
+    'avatar_url',
+    'profileImageUrl',
+    'profile_image_url',
+    'profilePhotoUrl',
+    'profile_photo_url',
+    'profile_picture',
+    'profilePic',
+    'profile_pic',
+    'profilePicture',
+    'photoUrl',
+    'photo_url',
+    'avatar',
+    'image',
+    'picture',
+  ]);
+  final safeName = _cleanProfileText(displayName);
+  final safeRole = _cleanProfileText(role);
+  final safeBio = _cleanProfileText(bio);
+  final safeAvatar = _cleanProfileText(avatar);
+
+  return _SuggestedUserEntry(
+    id: id,
+    displayName: safeName,
+    roleLabel: safeRole,
+    tagline: safeBio,
+    location: '',
+    company: '',
+    description: '',
+    avatarUrl: safeAvatar.isNotEmpty ? UrlHelper.absoluteUrl(safeAvatar) : null,
+    mutualsLabel: '',
+    verified: firstBool(const [
+      'verified',
+      'is_verified',
+      'company_verified',
+      'companyVerified',
+      'isCompanyVerified',
+      'is_company_verified',
+    ]),
+    isFollowing: false,
+  );
+}
+
+Map<String, dynamic> _mergeProfilePayloads(
+  Map<String, dynamic> primary,
+  Map<String, dynamic> secondary,
+) {
+  final merged = <String, dynamic>{...secondary, ...primary};
+  for (final key in ['user', 'profile', 'data']) {
+    final primaryValue = primary[key];
+    final secondaryValue = secondary[key];
+    if (primaryValue is Map || secondaryValue is Map) {
+      merged[key] = <String, dynamic>{
+        if (secondaryValue is Map) ...Map<String, dynamic>.from(secondaryValue),
+        if (primaryValue is Map) ...Map<String, dynamic>.from(primaryValue),
+      };
+    }
+  }
+  return merged;
+}
+
+String _cleanProfileText(String value) {
+  final v = value.trim();
+  if (v.isEmpty) return '';
+  final lower = v.toLowerCase();
+  const invalidExact = <String>{
+    'string',
+    'name',
+    'title',
+    'role',
+    'suggested user',
+    'bio',
+    'avatar',
+    'photo',
+    'image',
+    'picture',
+    'location',
+    'company',
+    'lat long',
+    'lat,long',
+    'latitude',
+    'longitude',
+    'null',
+    'undefined',
+    'n/a',
+    'na',
+    '-',
+    '--',
+  };
+  if (invalidExact.contains(lower)) return '';
+  if (RegExp(r'^\d+(\.\d+)?\s*,\s*\d+(\.\d+)?$').hasMatch(lower)) {
+    return '';
+  }
+  if (RegExp(r'^(lat|lng|lon|long|latitude|longitude)\b').hasMatch(lower)) {
+    return '';
+  }
+  if (RegExp(r'^\s*\(?\s*-?\d+(\.\d+)?\s*[, ]\s*-?\d+(\.\d+)?\s*\)?\s*$')
+      .hasMatch(lower)) {
+    return '';
+  }
+  return v;
 }
 
 String _pickString(Map<String, dynamic> map, List<String> keys) {
