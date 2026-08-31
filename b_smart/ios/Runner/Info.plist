@@ -76,6 +76,6 @@
 	<key>NSMicrophoneUsageDescription</key>
 	<string>We need access to your microphone to record videos with sound.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>We need your location to tag posts with your current place.</string>
+	<string>We use your location only when you tap Use current location to tag a post or reel with the place you are at.</string>
 </dict>
 </plist>

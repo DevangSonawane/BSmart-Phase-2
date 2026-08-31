@@ -41,15 +41,23 @@ post_install do |installer|
     flutter_additional_ios_build_settings(target)
 
     target.build_configurations.each do |config|
-      # Enable the permissions this app actually requests on iOS.
+      # Enable only the permissions this app actually requests on iOS.
       config.build_settings['GCC_PREPROCESSOR_DEFINITIONS'] ||= [
         '$(inherited)',
         'PERMISSION_CAMERA=1',
         'PERMISSION_MICROPHONE=1',
         'PERMISSION_PHOTOS=1',
-        'PERMISSION_LOCATION=1',
+        # bSmart only uses location while the app is in use to tag posts/reels.
+        # Do not compile the "Always" location branch unless we truly need it.
+        'PERMISSION_LOCATION=0',
+        'PERMISSION_LOCATION_WHENINUSE=1',
         'PERMISSION_NOTIFICATIONS=1',
       ]
+
+      if target.name == "geolocator_apple"
+        # Prevent geolocator from compiling the background-location authorization path.
+        config.build_settings['GCC_PREPROCESSOR_DEFINITIONS'] << 'BYPASS_PERMISSION_LOCATION_ALWAYS=1'
+      end
     end
   end
 end
