@@ -10,6 +10,7 @@ import '../../widgets/clay_container.dart';
 import '../../utils/validators.dart';
 import '../../utils/app_error_handler.dart';
 import '../../utils/timezone_service.dart';
+import 'apple_sign_in_button.dart';
 import 'google_sign_in_button.dart';
 
 class SignupScreen extends StatefulWidget {
@@ -136,7 +137,8 @@ class _SignupScreenState extends State<SignupScreen> {
 
   Future<void> _checkEmailAvailability(String email) async {
     final normalized = email.trim();
-    if (normalized.isEmpty || Validators.validateEmail(normalized) != null) return;
+    if (normalized.isEmpty || Validators.validateEmail(normalized) != null)
+      return;
     try {
       final result = await _usersApi.checkEmailAvailability(normalized);
       if (!mounted || _emailController.text.trim() != normalized) return;
@@ -163,7 +165,8 @@ class _SignupScreenState extends State<SignupScreen> {
 
   Future<void> _checkUsernameAvailability(String username) async {
     final normalized = username.trim();
-    if (normalized.isEmpty || Validators.validateUsername(normalized) != null) return;
+    if (normalized.isEmpty || Validators.validateUsername(normalized) != null)
+      return;
     try {
       final result = await _usersApi.checkUsernameAvailability(normalized);
       if (!mounted || _usernameController.text.trim() != normalized) return;
@@ -190,7 +193,8 @@ class _SignupScreenState extends State<SignupScreen> {
 
   Future<void> _checkPhoneAvailability(String phone) async {
     final normalized = phone.trim();
-    if (normalized.isEmpty || Validators.validatePhone(normalized) != null) return;
+    if (normalized.isEmpty || Validators.validatePhone(normalized) != null)
+      return;
     try {
       final result = await _usersApi.checkPhoneAvailability(normalized);
       if (!mounted || _phoneController.text.trim() != normalized) return;
@@ -316,7 +320,11 @@ class _SignupScreenState extends State<SignupScreen> {
     final pass = _passwordController.text;
     final confirm = _confirmController.text;
 
-    if (name.isEmpty || username.isEmpty || email.isEmpty || phone.isEmpty || pass.isEmpty) {
+    if (name.isEmpty ||
+        username.isEmpty ||
+        email.isEmpty ||
+        phone.isEmpty ||
+        pass.isEmpty) {
       setState(() => _error = 'Please fill all fields');
       return;
     }
@@ -363,8 +371,6 @@ class _SignupScreenState extends State<SignupScreen> {
     }
   }
 
-
-
   @override
   Widget build(BuildContext context) {
     final size = MediaQuery.of(context).size;
@@ -386,12 +392,26 @@ class _SignupScreenState extends State<SignupScreen> {
               child: Container(
                 padding: const EdgeInsets.fromLTRB(20, 24, 20, 24),
                 decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.96),
+                  color: Theme.of(context).brightness == Brightness.dark
+                      ? Theme.of(context)
+                          .colorScheme
+                          .surfaceContainerHighest
+                          .withValues(alpha: 0.72)
+                      : Colors.white.withValues(alpha: 0.96),
                   borderRadius: BorderRadius.circular(28),
-                  border: Border.all(color: InstagramTheme.borderGrey),
+                  border: Border.all(
+                    color: Theme.of(context).brightness == Brightness.dark
+                        ? Theme.of(context)
+                            .colorScheme
+                            .outline
+                            .withValues(alpha: 0.45)
+                        : InstagramTheme.borderGrey,
+                  ),
                   boxShadow: [
                     BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.06),
+                      color: Theme.of(context).brightness == Brightness.dark
+                          ? Colors.black.withValues(alpha: 0.35)
+                          : Colors.black.withValues(alpha: 0.06),
                       blurRadius: 28,
                       offset: const Offset(0, 12),
                     ),
@@ -426,7 +446,8 @@ class _SignupScreenState extends State<SignupScreen> {
                           hintText: 'John Doe',
                           icon: LucideIcons.user,
                         ),
-                        validator: (v) => (v == null || v.isEmpty) ? 'Required' : null,
+                        validator: (v) =>
+                            (v == null || v.isEmpty) ? 'Required' : null,
                       ),
                       const SizedBox(height: 14),
                       TextFormField(
@@ -447,10 +468,12 @@ class _SignupScreenState extends State<SignupScreen> {
                                   height: 20,
                                   child: Padding(
                                     padding: EdgeInsets.all(12.0),
-                                    child: CircularProgressIndicator(strokeWidth: 2),
+                                    child: CircularProgressIndicator(
+                                        strokeWidth: 2),
                                   ),
                                 )
-                              : _emailCheckedValue == _emailController.text.trim() &&
+                              : _emailCheckedValue ==
+                                          _emailController.text.trim() &&
                                       _emailAvailable != null
                                   ? Icon(
                                       _emailAvailable!
@@ -461,7 +484,8 @@ class _SignupScreenState extends State<SignupScreen> {
                                           : InstagramTheme.errorRed,
                                     )
                                   : null,
-                          helperText: _emailCheckedValue == _emailController.text.trim() &&
+                          helperText: _emailCheckedValue ==
+                                      _emailController.text.trim() &&
                                   _emailAvailabilityMessage != null
                               ? _emailAvailabilityMessage
                               : null,
@@ -472,7 +496,8 @@ class _SignupScreenState extends State<SignupScreen> {
                           if (error != null) return error;
                           if (_emailCheckedValue == value &&
                               _emailAvailable == false) {
-                            return _emailAvailabilityMessage ?? 'Email is already registered';
+                            return _emailAvailabilityMessage ??
+                                'Email is already registered';
                           }
                           return null;
                         },
@@ -496,10 +521,12 @@ class _SignupScreenState extends State<SignupScreen> {
                                   height: 20,
                                   child: Padding(
                                     padding: EdgeInsets.all(12.0),
-                                    child: CircularProgressIndicator(strokeWidth: 2),
+                                    child: CircularProgressIndicator(
+                                        strokeWidth: 2),
                                   ),
                                 )
-                              : _phoneCheckedValue == _phoneController.text.trim() &&
+                              : _phoneCheckedValue ==
+                                          _phoneController.text.trim() &&
                                       _phoneAvailable != null
                                   ? Icon(
                                       _phoneAvailable!
@@ -510,7 +537,8 @@ class _SignupScreenState extends State<SignupScreen> {
                                           : InstagramTheme.errorRed,
                                     )
                                   : null,
-                          helperText: _phoneCheckedValue == _phoneController.text.trim() &&
+                          helperText: _phoneCheckedValue ==
+                                      _phoneController.text.trim() &&
                                   _phoneAvailabilityMessage != null
                               ? _phoneAvailabilityMessage
                               : null,
@@ -521,7 +549,8 @@ class _SignupScreenState extends State<SignupScreen> {
                           if (error != null) return error;
                           if (_phoneCheckedValue == value &&
                               _phoneAvailable == false) {
-                            return _phoneAvailabilityMessage ?? 'Phone number is already registered';
+                            return _phoneAvailabilityMessage ??
+                                'Phone number is already registered';
                           }
                           return null;
                         },
@@ -544,10 +573,12 @@ class _SignupScreenState extends State<SignupScreen> {
                                   height: 20,
                                   child: Padding(
                                     padding: EdgeInsets.all(12.0),
-                                    child: CircularProgressIndicator(strokeWidth: 2),
+                                    child: CircularProgressIndicator(
+                                        strokeWidth: 2),
                                   ),
                                 )
-                              : _usernameCheckedValue == _usernameController.text.trim() &&
+                              : _usernameCheckedValue ==
+                                          _usernameController.text.trim() &&
                                       _usernameAvailable != null
                                   ? Icon(
                                       _usernameAvailable!
@@ -558,7 +589,8 @@ class _SignupScreenState extends State<SignupScreen> {
                                           : InstagramTheme.errorRed,
                                     )
                                   : null,
-                          helperText: _usernameCheckedValue == _usernameController.text.trim() &&
+                          helperText: _usernameCheckedValue ==
+                                      _usernameController.text.trim() &&
                                   _usernameAvailabilityMessage != null
                               ? _usernameAvailabilityMessage
                               : null,
@@ -569,7 +601,8 @@ class _SignupScreenState extends State<SignupScreen> {
                           if (error != null) return error;
                           if (_usernameCheckedValue == value &&
                               _usernameAvailable == false) {
-                            return _usernameAvailabilityMessage ?? 'Username is already taken';
+                            return _usernameAvailabilityMessage ??
+                                'Username is already taken';
                           }
                           return null;
                         },
@@ -587,7 +620,9 @@ class _SignupScreenState extends State<SignupScreen> {
                           hintText: '••••••••',
                           icon: LucideIcons.keyRound,
                         ),
-                        validator: (v) => (v == null || v.length < 6) ? 'At least 6 chars' : null,
+                        validator: (v) => (v == null || v.length < 6)
+                            ? 'At least 6 chars'
+                            : null,
                       ),
                       const SizedBox(height: 14),
                       TextFormField(
@@ -602,7 +637,9 @@ class _SignupScreenState extends State<SignupScreen> {
                           hintText: '••••••••',
                           icon: LucideIcons.keyRound,
                         ),
-                        validator: (v) => (v != _passwordController.text) ? 'Does not match' : null,
+                        validator: (v) => (v != _passwordController.text)
+                            ? 'Does not match'
+                            : null,
                       ),
                       const SizedBox(height: 14),
                       if (_error != null)
@@ -613,7 +650,8 @@ class _SignupScreenState extends State<SignupScreen> {
                             borderRadius: BorderRadius.circular(12),
                             border: Border.all(color: Colors.red.shade100),
                           ),
-                          child: Text(_error!, style: TextStyle(color: Colors.red.shade800)),
+                          child: Text(_error!,
+                              style: TextStyle(color: Colors.red.shade800)),
                         ),
                       const SizedBox(height: 18),
                       SizedBox(
@@ -622,7 +660,8 @@ class _SignupScreenState extends State<SignupScreen> {
                           onPressed: _loading
                               ? null
                               : () {
-                                  if (_formKey.currentState?.validate() != true) return;
+                                  if (_formKey.currentState?.validate() != true)
+                                    return;
                                   _signup();
                                 },
                           child: _loading
@@ -631,7 +670,8 @@ class _SignupScreenState extends State<SignupScreen> {
                                   width: 24,
                                   child: CircularProgressIndicator(
                                     strokeWidth: 2.5,
-                                    valueColor: AlwaysStoppedAnimation<Color>(InstagramTheme.textWhite),
+                                    valueColor: AlwaysStoppedAnimation<Color>(
+                                        InstagramTheme.textWhite),
                                   ),
                                 )
                               : const Text('SIGN UP'),
@@ -640,22 +680,43 @@ class _SignupScreenState extends State<SignupScreen> {
                       const SizedBox(height: 24),
                       Row(
                         children: [
-                          const Expanded(child: Divider(color: InstagramTheme.dividerGrey)),
+                          const Expanded(
+                              child:
+                                  Divider(color: InstagramTheme.dividerGrey)),
                           Padding(
                             padding: const EdgeInsets.symmetric(horizontal: 16),
                             child: Text(
                               'OR',
-                              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .bodyMedium
+                                  ?.copyWith(
                                     fontSize: 12,
                                     letterSpacing: 1.5,
                                   ),
                             ),
                           ),
-                          const Expanded(child: Divider(color: InstagramTheme.dividerGrey)),
+                          const Expanded(
+                              child:
+                                  Divider(color: InstagramTheme.dividerGrey)),
                         ],
                       ),
                       const SizedBox(height: 24),
-                      const GoogleSignInButton(label: 'Sign up with Google'),
+                      Center(
+                        child: Wrap(
+                          alignment: WrapAlignment.center,
+                          spacing: 12,
+                          runSpacing: 12,
+                          children: [
+                            const GoogleSignInButton(
+                                label: 'Sign up with Google'),
+                            if (AppleSignInButton.isSupportedPlatform)
+                              const AppleSignInButton(
+                                label: 'Sign up with Apple',
+                              ),
+                          ],
+                        ),
+                      ),
                       const SizedBox(height: 20),
                       Row(
                         mainAxisAlignment: MainAxisAlignment.center,
@@ -665,7 +726,8 @@ class _SignupScreenState extends State<SignupScreen> {
                             style: Theme.of(context).textTheme.bodyMedium,
                           ),
                           TextButton(
-                            onPressed: () => Navigator.of(context).pushReplacementNamed('/login'),
+                            onPressed: () => Navigator.of(context)
+                                .pushReplacementNamed('/login'),
                             child: const Text('Log In'),
                           ),
                         ],

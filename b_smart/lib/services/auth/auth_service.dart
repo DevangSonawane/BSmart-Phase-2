@@ -4,11 +4,13 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import '../../api/api.dart';
+import '../../models/auth/apple_auth_models.dart';
 import '../../models/auth/auth_user_model.dart' as model;
 import '../../models/auth/signup_session_model.dart';
 import '../../utils/validators.dart';
 import '../../utils/constants.dart';
 import '../../utils/timezone_service.dart';
+import 'apple_auth_service.dart';
 import '../push_service.dart';
 import '../session_reset_service.dart';
 
@@ -52,6 +54,7 @@ class AuthService {
     scopes: ['email', 'https://www.googleapis.com/auth/userinfo.profile'],
     serverClientId: AuthConstants.googleWebClientId,
   );
+  final AppleAuthService _appleAuthService = AppleAuthService();
 
   // In-memory storage for signup sessions during the flow
   final Map<String, SignupSession> _sessions = {};
@@ -187,6 +190,26 @@ class AuthService {
       );
     } catch (e) {
       throw Exception('Google login failed: ${e.toString()}');
+    }
+  }
+
+  /// Captures the Apple credential that will later be exchanged with the
+  /// backend once the Apple auth API is available.
+  Future<AppleAuthenticationResult?> loginWithApple() async {
+    try {
+      final result = await _appleAuthService.signIn();
+      if (result == null) return null;
+
+      // TODO(bsmart-backend): exchange `result.toPendingBackendPayload()`
+      // with the eventual Apple auth endpoint, then persist the returned app
+      // token via `AuthApi` / `ApiClient` just like Google login does.
+      return result;
+    } on ApiException catch (e) {
+      throw Exception('Apple login failed: ${e.message}');
+    } on UnsupportedError {
+      rethrow;
+    } catch (e) {
+      throw Exception('Apple login failed: ${e.toString()}');
     }
   }
 

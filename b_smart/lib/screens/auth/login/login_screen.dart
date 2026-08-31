@@ -9,6 +9,7 @@ import '../../../utils/app_error_handler.dart';
 import '../../../state/app_state.dart';
 import '../../../state/auth_actions.dart';
 import '../../home_dashboard.dart';
+import '../apple_sign_in_button.dart';
 import '../google_sign_in_button.dart';
 // Using native GoogleSignIn / secure browser flows; no embedded WebView
 
@@ -498,8 +499,19 @@ class _LoginScreenState extends State<LoginScreen>
                       ),
                       const SizedBox(height: 32),
 
-                      // Google Sign In Button
-                      const GoogleSignInButton(),
+                      // Social sign in buttons
+                      Center(
+                        child: Wrap(
+                          alignment: WrapAlignment.center,
+                          spacing: 12,
+                          runSpacing: 12,
+                          children: [
+                            const GoogleSignInButton(),
+                            if (AppleSignInButton.isSupportedPlatform)
+                              const AppleSignInButton(),
+                          ],
+                        ),
+                      ),
                       const SizedBox(height: 32),
 
                       // Sign Up Link

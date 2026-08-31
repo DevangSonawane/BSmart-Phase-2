@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:flutter_redux/flutter_redux.dart';
-import '../../api/auth_api.dart';
 import '../../services/auth/auth_service.dart';
 import '../../services/session_reset_service.dart';
 import '../../services/push_service.dart';
@@ -19,7 +18,6 @@ class GoogleSignInButton extends StatefulWidget {
 }
 
 class _GoogleSignInButtonState extends State<GoogleSignInButton> {
-  final _authApi = AuthApi();
   final _authService = AuthService();
 
   bool _loading = false;
@@ -53,7 +51,8 @@ class _GoogleSignInButtonState extends State<GoogleSignInButton> {
         await PushService().syncTokenWithBackend();
         await SessionResetService.instance.clearUserSessionState();
         if (mounted && user.id.isNotEmpty) {
-          StoreProvider.of<AppState>(context).dispatch(SetAuthenticated(user.id));
+          StoreProvider.of<AppState>(context)
+              .dispatch(SetAuthenticated(user.id));
         }
         Navigator.of(context).pushAndRemoveUntil(
           MaterialPageRoute(builder: (_) => const HomeDashboard()),
@@ -81,35 +80,45 @@ class _GoogleSignInButtonState extends State<GoogleSignInButton> {
       mainAxisSize: MainAxisSize.min,
       children: [
         SizedBox(
-          width: double.infinity,
+          width: 52,
           height: 52,
-          child: OutlinedButton.icon(
-            onPressed: _loading ? null : _handleGoogleSignIn,
-            icon: _loading
-                ? const SizedBox(
-                    width: 20,
-                    height: 20,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : SvgPicture.asset(
-                    'assets/images/google_logo.svg', // add this asset or use an icon
-                    height: 22,
-                    // SvgPicture does not have errorBuilder, so removing it
+          child: Semantics(
+            button: true,
+            label: widget.label,
+            child: Tooltip(
+              message: widget.label,
+              child: OutlinedButton(
+                onPressed: _loading ? null : _handleGoogleSignIn,
+                style: OutlinedButton.styleFrom(
+                  padding: EdgeInsets.zero,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
                   ),
-            label: Text(widget.label),
-            style: OutlinedButton.styleFrom(
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
+                ),
+                child: _loading
+                    ? const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : SvgPicture.asset(
+                        'assets/images/google_logo.svg',
+                        width: 22,
+                        height: 22,
+                      ),
               ),
             ),
           ),
         ),
         if (_error != null) ...[
           const SizedBox(height: 8),
-          Text(
-            _error!,
-            style: const TextStyle(color: Colors.red, fontSize: 13),
-            textAlign: TextAlign.center,
+          SizedBox(
+            width: 52,
+            child: Text(
+              _error!,
+              style: const TextStyle(color: Colors.red, fontSize: 13),
+              textAlign: TextAlign.center,
+            ),
           ),
         ],
       ],
