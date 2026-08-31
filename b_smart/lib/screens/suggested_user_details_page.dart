@@ -144,6 +144,8 @@ class _SuggestedUserDetailsPageState extends State<SuggestedUserDetailsPage> {
     return Scaffold(
       backgroundColor: const Color(0xFFF4F2ED),
       body: SafeArea(
+        left: false,
+        right: false,
         child: RefreshIndicator(
           onRefresh: _load,
           color: const Color(0xFF111318),
@@ -151,32 +153,41 @@ class _SuggestedUserDetailsPageState extends State<SuggestedUserDetailsPage> {
             physics: const AlwaysScrollableScrollPhysics(
               parent: BouncingScrollPhysics(),
             ),
-            padding: const EdgeInsets.fromLTRB(22, 18, 22, 28),
+            padding: const EdgeInsets.fromLTRB(0, 18, 0, 28),
             children: [
-              _Header(
-                onBack: () => Navigator.of(context).maybePop(),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 22),
+                child: _Header(
+                  onBack: () => Navigator.of(context).maybePop(),
+                ),
               ),
               const SizedBox(height: 14),
-              if (_loading)
-                const _HeroPlaceholder()
-              else if (hero != null)
-                _HeroSuggestionCard(
-                  person: hero,
-                  imageHeaders: _imageHeaders,
-                  onTap: () => _openProfile(hero.id),
-                )
-              else
-                _EmptyHero(
-                  message: _error ?? 'No suggested users available right now.',
-                  onRetry: _load,
-                ),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 22),
+                child: _loading
+                    ? const _HeroPlaceholder()
+                    : hero != null
+                        ? _HeroSuggestionCard(
+                            person: hero,
+                            imageHeaders: _imageHeaders,
+                            onTap: () => _openProfile(hero.id),
+                          )
+                        : _EmptyHero(
+                            message: _error ??
+                                'No suggested users available right now.',
+                            onRetry: _load,
+                          ),
+              ),
               const SizedBox(height: 26),
-              Text(
-                'Do you know these?',
-                style: GoogleFonts.montserrat(
-                  fontSize: 15,
-                  fontWeight: FontWeight.w900,
-                  color: const Color(0xFF1B1B1F),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 22),
+                child: Text(
+                  'Do you know these?',
+                  style: GoogleFonts.montserrat(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w900,
+                    color: const Color(0xFF1B1B1F),
+                  ),
                 ),
               ),
               const SizedBox(height: 16),
@@ -184,7 +195,7 @@ class _SuggestedUserDetailsPageState extends State<SuggestedUserDetailsPage> {
                 const _CardsPlaceholder()
               else if (cards.isEmpty)
                 Padding(
-                  padding: const EdgeInsets.only(bottom: 20),
+                  padding: const EdgeInsets.symmetric(horizontal: 22),
                   child: Text(
                     'No more suggestions to show.',
                     style: GoogleFonts.montserrat(
@@ -196,9 +207,9 @@ class _SuggestedUserDetailsPageState extends State<SuggestedUserDetailsPage> {
                 )
               else
                 SizedBox(
-                  height: 152,
+                  height: 148,
                   child: ListView.separated(
-                    padding: const EdgeInsets.symmetric(horizontal: 14),
+                    padding: const EdgeInsets.only(left: 18),
                     scrollDirection: Axis.horizontal,
                     physics: const BouncingScrollPhysics(),
                     itemCount: cards.length,
@@ -215,58 +226,61 @@ class _SuggestedUserDetailsPageState extends State<SuggestedUserDetailsPage> {
                   ),
                 ),
               const SizedBox(height: 34),
-              Row(
-                children: [
-                  Expanded(
-                    child: SizedBox(
-                      height: 58,
-                      child: ElevatedButton(
-                        onPressed: _openDiscover,
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFF16181D),
-                          foregroundColor: Colors.white,
-                          elevation: 0,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(20),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 22),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: SizedBox(
+                        height: 58,
+                        child: ElevatedButton(
+                          onPressed: _openDiscover,
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFF16181D),
+                            foregroundColor: Colors.white,
+                            elevation: 0,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(20),
+                            ),
                           ),
-                        ),
-                        child: Text(
-                          'Discover',
-                          style: GoogleFonts.montserrat(
-                            fontSize: 17,
-                            fontWeight: FontWeight.w800,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 18),
-                  Expanded(
-                    child: SizedBox(
-                      height: 58,
-                      child: OutlinedButton(
-                        onPressed: _openMessages,
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: const Color(0xFF1B1B1F),
-                          side: const BorderSide(
-                            color: Color(0xFF1B1B1F),
-                            width: 2.2,
-                          ),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(20),
-                          ),
-                        ),
-                        child: Text(
-                          'Messages',
-                          style: GoogleFonts.montserrat(
-                            fontSize: 17,
-                            fontWeight: FontWeight.w800,
+                          child: Text(
+                            'Discover',
+                            style: GoogleFonts.montserrat(
+                              fontSize: 17,
+                              fontWeight: FontWeight.w800,
+                            ),
                           ),
                         ),
                       ),
                     ),
-                  ),
-                ],
+                    const SizedBox(width: 18),
+                    Expanded(
+                      child: SizedBox(
+                        height: 58,
+                        child: OutlinedButton(
+                          onPressed: _openMessages,
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: const Color(0xFF1B1B1F),
+                            side: const BorderSide(
+                              color: Color(0xFF1B1B1F),
+                              width: 2.2,
+                            ),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(20),
+                            ),
+                          ),
+                          child: Text(
+                            'Messages',
+                            style: GoogleFonts.montserrat(
+                              fontSize: 17,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ],
           ),
@@ -325,15 +339,14 @@ class _HeroSuggestionCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final borderRadius = BorderRadius.circular(42);
     final hasImage = (person.avatarUrl ?? '').trim().isNotEmpty;
 
     return GestureDetector(
       onTap: onTap,
       child: ClipRRect(
-        borderRadius: borderRadius,
+        borderRadius: BorderRadius.circular(38),
         child: AspectRatio(
-          aspectRatio: 0.82,
+          aspectRatio: 0.92,
           child: Stack(
             fit: StackFit.expand,
             children: [
@@ -383,7 +396,7 @@ class _HeroSuggestionCard extends StatelessWidget {
                 ),
               ),
               Padding(
-                padding: const EdgeInsets.fromLTRB(22, 22, 22, 22),
+                padding: const EdgeInsets.fromLTRB(20, 20, 20, 20),
                 child: Align(
                   alignment: Alignment.bottomLeft,
                   child: Column(
@@ -407,25 +420,25 @@ class _HeroSuggestionCard extends StatelessWidget {
                             person.roleLabel.toUpperCase(),
                             style: GoogleFonts.montserrat(
                               color: Colors.white,
-                              fontSize: 11,
+                              fontSize: 10,
                               fontWeight: FontWeight.w800,
                               letterSpacing: 0.4,
                             ),
                           ),
                         ),
-                      const SizedBox(height: 14),
+                      const SizedBox(height: 10),
                       Text(
                         person.displayName,
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
                         style: GoogleFonts.cormorantGaramond(
                           color: Colors.white,
-                          fontSize: 36,
+                          fontSize: 32,
                           height: 0.92,
                           fontWeight: FontWeight.w700,
                         ),
                       ),
-                      const SizedBox(height: 10),
+                      const SizedBox(height: 8),
                       if (person.tagline.isNotEmpty)
                         Text(
                           person.tagline,
@@ -433,15 +446,15 @@ class _HeroSuggestionCard extends StatelessWidget {
                           overflow: TextOverflow.ellipsis,
                           style: GoogleFonts.montserrat(
                             color: Colors.white.withValues(alpha: 0.94),
-                            fontSize: 16,
+                            fontSize: 14,
                             height: 1.28,
                             fontWeight: FontWeight.w500,
                           ),
                         ),
-                      const SizedBox(height: 14),
+                      const SizedBox(height: 12),
                       Wrap(
-                        spacing: 14,
-                        runSpacing: 10,
+                        spacing: 12,
+                        runSpacing: 8,
                         crossAxisAlignment: WrapCrossAlignment.center,
                         children: [
                           if (person.location.isNotEmpty)
@@ -456,7 +469,7 @@ class _HeroSuggestionCard extends StatelessWidget {
                             ),
                         ],
                       ),
-                      const SizedBox(height: 12),
+                      const SizedBox(height: 10),
                       if (person.verified)
                         Container(
                           padding: const EdgeInsets.symmetric(
@@ -491,14 +504,14 @@ class _HeroSuggestionCard extends StatelessWidget {
                             ],
                           ),
                         ),
-                      if (person.verified) const SizedBox(height: 12),
+                      if (person.verified) const SizedBox(height: 10),
                       Text(
                         person.description,
                         maxLines: 4,
                         overflow: TextOverflow.ellipsis,
                         style: GoogleFonts.montserrat(
                           color: Colors.white.withValues(alpha: 0.78),
-                          fontSize: 14,
+                          fontSize: 13,
                           height: 1.36,
                           fontWeight: FontWeight.w500,
                         ),
@@ -568,7 +581,7 @@ class _SuggestedPersonCard extends StatelessWidget {
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.center,
-          mainAxisSize: MainAxisSize.min,
+          mainAxisSize: MainAxisSize.max,
           children: [
             Row(
               mainAxisAlignment: MainAxisAlignment.end,
@@ -642,51 +655,7 @@ class _SuggestedPersonCard extends StatelessWidget {
                 fontWeight: FontWeight.w900,
               ),
             ),
-            const SizedBox(height: 2),
-            FittedBox(
-              fit: BoxFit.scaleDown,
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  _MutualDot(color: Colors.grey.shade500, offset: -6),
-                  _MutualDot(color: Colors.grey.shade400, offset: 0),
-                  const SizedBox(width: 6),
-                  Text(
-                    person.mutualsLabel,
-                    style: GoogleFonts.montserrat(
-                      color: const Color(0xFF6C6A71),
-                      fontSize: 8,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                ],
-              ),
-            ),
           ],
-        ),
-      ),
-    );
-  }
-}
-
-class _MutualDot extends StatelessWidget {
-  final Color color;
-  final double offset;
-
-  const _MutualDot({required this.color, required this.offset});
-
-  @override
-  Widget build(BuildContext context) {
-    return Transform.translate(
-      offset: Offset(offset, 0),
-      child: Container(
-        width: 24,
-        height: 24,
-        decoration: BoxDecoration(
-          color: color,
-          shape: BoxShape.circle,
-          border: Border.all(color: Colors.white, width: 2),
         ),
       ),
     );
@@ -728,15 +697,15 @@ class _CardsPlaceholder extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return SizedBox(
-      height: 148,
+      height: 136,
       child: ListView.separated(
-        padding: const EdgeInsets.symmetric(horizontal: 14),
+        padding: const EdgeInsets.symmetric(horizontal: 0),
         scrollDirection: Axis.horizontal,
         physics: const NeverScrollableScrollPhysics(),
         itemCount: 3,
-        separatorBuilder: (_, __) => const SizedBox(width: 10),
+        separatorBuilder: (_, __) => const SizedBox(width: 12),
         itemBuilder: (_, __) => Container(
-          width: 116,
+          width: 104,
           padding: const EdgeInsets.all(8),
           decoration: BoxDecoration(
             color: Colors.white,
@@ -961,27 +930,23 @@ class _SuggestedUserEntry {
     ]);
 
     final title = displayName.isNotEmpty ? displayName : username;
-    final tagline = bio.isNotEmpty
-        ? bio
-        : (reason.isNotEmpty ? reason : 'Building something worth following.');
+    final tagline = bio.isNotEmpty ? bio : reason;
 
     final pieces = <String>[];
     if (location.isNotEmpty) pieces.add(location);
     if (company.isNotEmpty) pieces.add(company);
-    final description = pieces.isNotEmpty
-        ? pieces.join(' · ')
-        : 'Former product lead looking for the right collaborators and momentum.';
+    final description = pieces.isNotEmpty ? pieces.join(' · ') : '';
 
     return _SuggestedUserEntry(
       id: id,
       displayName: title.isNotEmpty ? title : 'Suggested user',
-      roleLabel: role.isNotEmpty ? role : 'Creator',
+      roleLabel: role,
       tagline: tagline,
       location: location,
       company: company,
       description: description,
       avatarUrl: avatar.isEmpty ? null : UrlHelper.absoluteUrl(avatar),
-      mutualsLabel: mutuals.isNotEmpty ? mutuals : 'Suggested for you',
+      mutualsLabel: mutuals,
       verified: verified,
       isFollowing: isFollowing,
     );
