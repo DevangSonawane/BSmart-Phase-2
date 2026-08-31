@@ -71,7 +71,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:visibility_detector/visibility_detector.dart';
 import 'profile_screen.dart';
 import '../routes.dart';
-import 'follow_list_screen.dart';
 import 'messaging_screen.dart';
 import '../services/home_onboarding_service.dart';
 
@@ -1535,21 +1534,7 @@ class _HomeDashboardState extends State<HomeDashboard>
 
   Future<void> _openSuggestionsSeeAll() async {
     if (!mounted) return;
-    final uid = _currentUserId ?? '';
-    if (uid.isEmpty) return;
-    final username = (_currentUserProfile?['username'] ??
-            _currentUserProfile?['userName'] ??
-            _currentUserProfile?['full_name'] ??
-            _currentUserProfile?['fullName'] ??
-            'You')
-        .toString();
-    await FollowListScreen.open(
-      context,
-      userId: uid,
-      username: username,
-      mode: FollowListMode.vendors,
-      isOwnProfile: true,
-    );
+    await Navigator.of(context).pushNamed('/suggested-user-details');
   }
 
   List<_FeedRenderRow> _buildFeedRows(List<FeedPost> posts) {
@@ -1558,6 +1543,16 @@ class _HomeDashboardState extends State<HomeDashboard>
     var peopleBlockIndex = 0;
     var vendorBlockIndex = 0;
     var insertCycleIndex = 0;
+
+    // Temporary test placement: surface suggested people at the very top.
+    final hasPeopleSuggestions = _followSuggestionsLoading ||
+        _followSuggestions.any(
+          (u) => !_dismissedSuggestionUserIds.contains(u.id),
+        );
+    if (hasPeopleSuggestions) {
+      rows.add(_FeedRenderRow.peopleSuggestions(peopleBlockIndex));
+      peopleBlockIndex++;
+    }
 
     FeedPost? nextAdForBlock(int idx) {
       final list = _adSuggestions;
@@ -1574,8 +1569,8 @@ class _HomeDashboardState extends State<HomeDashboard>
       if (postCount % 5 != 0) continue;
 
       // After every 5 posts, insert ONE block in a repeating cycle:
-      // Reels → Ads → People → Vendors → (repeat)
-      final cycle = insertCycleIndex % 4;
+      // Reels → Ads → Vendors → (repeat)
+      final cycle = insertCycleIndex % 3;
       insertCycleIndex++;
 
       switch (cycle) {
@@ -1591,15 +1586,6 @@ class _HomeDashboardState extends State<HomeDashboard>
           }
           break;
         case 2:
-          final hasPeople = _followSuggestions.any(
-            (u) => !_dismissedSuggestionUserIds.contains(u.id),
-          );
-          if (_followSuggestionsLoading || hasPeople) {
-            rows.add(_FeedRenderRow.peopleSuggestions(peopleBlockIndex));
-            peopleBlockIndex++;
-          }
-          break;
-        case 3:
         default:
           final hasVendors = _vendorSuggestions.any(
             (u) => !_dismissedVendorSuggestionIds.contains(u.id),
@@ -3649,7 +3635,8 @@ class _HomeDashboardState extends State<HomeDashboard>
                                         helperText:
                                             'Find and follow other people based on your interests.',
                                         users: users,
-                                        onSeeAll: null,
+                                        onSeeAll: _openSuggestionsSeeAll,
+                                        seeAllLabel: 'See more',
                                         onOverflow: null,
                                       ),
                                     ],
